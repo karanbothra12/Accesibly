@@ -1,0 +1,208 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Brand palette (landing keeps gold) */
+  --color-gold:    #C9A227;
+  --color-gold-lt: #FBF5DC;
+  --color-sidebar: #080E1C;
+  --color-canvas:  #F5F6FB;
+
+  /* Dashboard accent system (indigo / violet) */
+  --color-primary:      #6366F1;
+  --color-primary-dark: #4F46E5;
+  --color-primary-lt:   #EEF2FF;
+  --color-violet:       #8B5CF6;
+  --color-teal:         #14B8A6;
+  --color-rose:         #F43F5E;
+  --color-amber:        #F59E0B;
+  --color-sky:          #0EA5E9;
+
+  /* Semantic */
+  --color-background: #ffffff;
+  --color-foreground: #0f172a;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+
+/* ── Landing page motion & effects ──────────────────────────── */
+@keyframes floaty      { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+@keyframes floatySlow  { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-22px); } }
+@keyframes auroraDrift { 0% { transform: translate(0,0) scale(1); } 50% { transform: translate(40px,-30px) scale(1.15); } 100% { transform: translate(0,0) scale(1); } }
+@keyframes shimmerMove { to { background-position: 200% center; } }
+@keyframes marquee     { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes pulseRing   { 0% { box-shadow: 0 0 0 0 rgba(201,162,39,.5); } 70% { box-shadow: 0 0 0 16px rgba(201,162,39,0); } 100% { box-shadow: 0 0 0 0 rgba(201,162,39,0); } }
+
+.anim-floaty     { animation: floaty 6s ease-in-out infinite; }
+.anim-floaty-slow{ animation: floatySlow 8s ease-in-out infinite; }
+.anim-aurora     { animation: auroraDrift 18s ease-in-out infinite; }
+.anim-pulse-ring { animation: pulseRing 2.6s ease-out infinite; }
+
+.shimmer-text {
+  background: linear-gradient(100deg, #C9A227 20%, #F5D678 40%, #C9A227 60%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: shimmerMove 4s linear infinite;
+}
+
+.glass {
+  background: rgba(255,255,255,.06);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,.12);
+}
+
+.grid-dots {
+  background-image: radial-gradient(rgba(255,255,255,.09) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.marquee-track { animation: marquee 26s linear infinite; }
+
+.reveal { opacity: 0; transform: translateY(26px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+.reveal.in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-floaty, .anim-floaty-slow, .anim-aurora, .anim-pulse-ring, .shimmer-text, .marquee-track { animation: none !important; }
+  .reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+}
+
+/* ── Cinematic extras ───────────────────────────────────────── */
+/* 3D tilt card with a light glare that tracks the cursor */
+.tilt-card { transform-style: preserve-3d; position: relative; }
+.tilt-card > * { position: relative; z-index: 1; }
+.tilt-card::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; z-index: 2;
+  background: radial-gradient(circle at var(--gx,50%) var(--gy,50%), rgba(255,255,255,.35), transparent 45%);
+  opacity: 0; transition: opacity .3s ease; pointer-events: none; mix-blend-mode: overlay;
+}
+.tilt-card:hover::after { opacity: 1; }
+
+/* Animated aurora mesh for dark hero sections */
+@keyframes meshDrift {
+  0%   { background-position: 0% 0%, 100% 0%, 50% 100%; }
+  50%  { background-position: 30% 20%, 70% 30%, 40% 80%; }
+  100% { background-position: 0% 0%, 100% 0%, 50% 100%; }
+}
+.aurora-mesh {
+  background-image:
+    radial-gradient(40rem 40rem at 15% 10%, rgba(99,102,241,.35), transparent 60%),
+    radial-gradient(38rem 38rem at 85% 15%, rgba(139,92,246,.28), transparent 60%),
+    radial-gradient(44rem 44rem at 50% 110%, rgba(14,165,233,.20), transparent 60%);
+  background-repeat: no-repeat;
+  animation: meshDrift 22s ease-in-out infinite;
+}
+.text-gradient {
+  background: linear-gradient(120deg, #FFFFFF 0%, #C7D2FE 40%, #A78BFA 100%);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent;
+}
+.text-gradient-ink {
+  background: linear-gradient(120deg, #4F46E5 0%, #7C3AED 60%, #0EA5E9 100%);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent;
+}
+.glow { box-shadow: 0 0 0 1px rgba(99,102,241,.35), 0 16px 44px -8px rgba(99,102,241,.5); }
+
+/* Conic beam sweep */
+@keyframes spin360 { to { transform: rotate(360deg); } }
+.beam-sweep::before {
+  content: ''; position: absolute; inset: -50%; z-index: 0;
+  background: conic-gradient(from 0deg, transparent 0 70%, rgba(201,162,39,.12) 85%, transparent 100%);
+  animation: spin360 14s linear infinite;
+}
+
+.text-gradient-gold {
+  background: linear-gradient(120deg, #FFFFFF 0%, #F5D678 45%, #C9A227 100%);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent;
+}
+.glow-gold { box-shadow: 0 0 0 1px rgba(201,162,39,.35), 0 12px 40px -8px rgba(201,162,39,.45); }
+
+/* Gradient-border card (dark) */
+.grad-border {
+  position: relative; background-clip: padding-box; border: 1px solid transparent;
+}
+.grad-border::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; z-index: -1;
+  background: linear-gradient(135deg, rgba(129,140,248,.7), rgba(255,255,255,.10) 45%, rgba(167,139,250,.5));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+}
+
+/* Word-by-word hero reveal */
+@keyframes wordUp { from { opacity: 0; transform: translateY(28px) rotate(2deg); } to { opacity: 1; transform: none; } }
+.word-up { display: inline-block; opacity: 0; animation: wordUp .8s cubic-bezier(.2,.7,.2,1) forwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora-mesh, .beam-sweep::before { animation: none !important; }
+  .word-up { opacity: 1 !important; animation: none !important; }
+  .tilt-card { transform: none !important; }
+}
+
+/* ── Dashboard surfaces ─────────────────────────────────────── */
+/* Cinematic dashboard hero banner */
+.dash-hero {
+  background:
+    radial-gradient(30rem 30rem at 90% -40%, rgba(201,162,39,.35), transparent 60%),
+    radial-gradient(26rem 26rem at 10% 140%, rgba(59,130,246,.25), transparent 60%),
+    linear-gradient(120deg, #080E1C 0%, #0c1428 60%, #111a30 100%);
+}
+.stat-glow { transition: transform .2s ease, box-shadow .2s ease; }
+.stat-glow:hover { transform: translateY(-3px); box-shadow: 0 18px 44px -20px rgba(201,162,39,.5); }
+.card-elev {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 12px 32px -16px rgba(15, 23, 42, .16);
+}
+.card-hover { transition: box-shadow .2s ease, transform .2s ease, border-color .2s ease; }
+.card-hover:hover {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 20px 44px -20px rgba(15, 23, 42, .26);
+  transform: translateY(-2px);
+}
+/* Soft dashboard canvas backdrop (cool, indigo/violet tints) */
+.dash-bg {
+  background:
+    radial-gradient(900px 520px at 100% -8%, rgba(99, 102, 241, .10), transparent 60%),
+    radial-gradient(760px 460px at -10% 0%, rgba(139, 92, 246, .08), transparent 55%),
+    var(--color-canvas);
+}
+
+/* ── Modern dashboard chrome ─────────────────────────────────── */
+.nav-pill { position: relative; transition: background .15s ease, color .15s ease; }
+.nav-pill-active {
+  background: var(--color-primary-lt);
+  color: var(--color-primary-dark);
+  font-weight: 600;
+}
+.nav-pill-active::before {
+  content: ''; position: absolute; left: -12px; top: 50%; transform: translateY(-50%);
+  width: 4px; height: 22px; border-radius: 0 4px 4px 0; background: var(--color-primary);
+}
+/* Soft, rounded, elevated card used across the redesigned dashboard */
+.ui-card {
+  background: #fff; border: 1px solid rgba(226,232,240,.8); border-radius: 20px;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 18px 40px -24px rgba(79,70,229,.18);
+}
+.ui-card-hover { transition: transform .2s ease, box-shadow .2s ease; }
+.ui-card-hover:hover { transform: translateY(-3px); box-shadow: 0 24px 48px -24px rgba(79,70,229,.35); }
+/* Gradient accent header banner */
+.hero-indigo {
+  background:
+    radial-gradient(26rem 26rem at 88% -60%, rgba(139,92,246,.55), transparent 60%),
+    radial-gradient(24rem 24rem at 6% 140%, rgba(14,165,233,.40), transparent 60%),
+    linear-gradient(120deg, #4F46E5 0%, #6366F1 55%, #7C3AED 100%);
+}
+.tint-indigo { background: var(--color-primary-lt); color: var(--color-primary-dark); }
+.tint-violet { background: #F3E8FF; color: #7C3AED; }
+.tint-teal   { background: #CCFBF1; color: #0F766E; }
+.tint-sky    { background: #E0F2FE; color: #0369A1; }
+.tint-amber  { background: #FEF3C7; color: #B45309; }
+.tint-rose   { background: #FFE4E6; color: #BE123C; }
+@media (prefers-reduced-motion: reduce) {
+  .card-hover:hover { transform: none; }
+}
