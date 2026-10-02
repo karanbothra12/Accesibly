@@ -1,0 +1,22 @@
+# Keep the build context small and NEVER bake secrets or local build output in.
+node_modules
+.next
+out
+.git
+.gitignore
+# Secrets — never copy real env files into an image (only .env.example is safe).
+.env
+.env.local
+.env.*.local
+# Local/build artifacts
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+.idea
+.vscode
+.vercel
+# Tests aren't needed at runtime
+tests
+vitest.config.ts

@@ -1,0 +1,57 @@
+# Render Blueprint — BACKGROUND WORKER ONLY.
+# The web app, PDF export, and in-process crawls run on Vercel (which uses the
+# serverless @sparticuz/chromium path). Vercel can't run a long-lived process, so
+# the crawl/monitoring worker is hosted here on Render instead.
+#
+# This creates two services:
+#   1. accessly-worker — the Docker worker (drains the crawl_jobs queue + monitoring)
+#   2. accessly-vnu     — the W3C HTML validator the worker calls (private, internal)
+#
+# On Vercel, set CRAWL_WORKER_ENABLED=1 so crawls are left queued for this worker.
+# Both must point at the SAME Neon DATABASE_URL, and SESSION_SECRET / INTERNAL_TOKEN
+# must be the SAME values on Vercel and here (paste them — Render can't read Vercel).
+# Keep both services in one region so the worker reaches the validator privately.
+
+services:
+  # 1. Background worker — crawler + scheduled-monitoring loop (no HTTP port).
+  - type: worker
+    name: accessly-worker
+    runtime: docker
+    region: oregon
+    plan: standard                       # crawls are CPU/RAM heavy; size up as needed
+    dockerfilePath: ./worker/Dockerfile
+    dockerContext: .                     # build from repo root (Dockerfile COPYs the app)
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL                # SAME Neon string as Vercel (…?sslmode=require)
+        sync: false
+      - key: SESSION_SECRET              # SAME value as on Vercel
+        sync: false
+      - key: INTERNAL_TOKEN              # SAME value as on Vercel
+        sync: false
+      - key: AUDIT_USER_AGENT
+        value: "AccesslyAuditBot/1.0 (+https://accessly.io/bot)"
+      - key: WORKER_POLL_MS
+        value: "5000"
+      - key: WORKER_STALL_MINUTES
+        value: "15"
+      - key: VNU_URL                     # internal address of the validator below
+        value: "http://accessly-vnu:8888"
+      # CSS validation needs a SEPARATE Jigsaw image — leave unset for the pilot
+      # (CSS jobs fail gracefully). To enable, add another pserv and set:
+      # - key: CSS_VALIDATOR_URL
+      #   value: "http://accessly-css:8888/css-validator/validator"
+      - key: RESEND_API_KEY             # optional until go-live (alerts queue if unset)
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+
+  # 2. vnu — W3C Nu Html Checker (private service; only the worker reaches it).
+  - type: pserv
+    name: accessly-vnu
+    runtime: image
+    region: oregon
+    plan: starter
+    image:
+      url: ghcr.io/validator/validator:latest
+    # Listens on 8888 → reachable privately at http://accessly-vnu:8888
