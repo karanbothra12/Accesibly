@@ -50,10 +50,13 @@ function scoreColor(score: number): string {
   return score >= 90 ? '#16a34a' : score >= 70 ? '#d97706' : '#dc2626'
 }
 
+export type CompetitorIssue = { id: string; impact: string; help: string; description: string; count: number; sample: string[] }
+export type CompetitorSeoFailure = { id: string; label: string; status: 'warn' | 'fail'; detail: string }
 export type CompetitorScorecard = {
   url: string; ok: boolean; statusCode: number | null; error: string | null
   a11yIssues: number; critical: number; serious: number; moderate: number; minor: number
   seoScore: number | null; seoIssues: number | null
+  issues?: CompetitorIssue[]; seoFailures?: CompetitorSeoFailure[]
 }
 export type CompetitorReport = {
   your_url: string; competitor_url: string; created_at: string
@@ -74,7 +77,22 @@ export function buildCompetitorHtml(rep: CompetitorReport): string {
         <p class="muted">${c.critical} critical · ${c.serious} serious · ${c.moderate} moderate · ${c.minor} minor</p>`}
     </div>`
 
+  const detailCol = (title: string, c: CompetitorScorecard) => {
+    const issues = c.issues || [], seo = c.seoFailures || []
+    if (c.error) return `<div class="dcard"><div class="ctitle">${esc(title)}</div><p class="muted">Couldn't audit.</p></div>`
+    const a11y = issues.length === 0
+      ? `<p class="ok">No accessibility issues</p>`
+      : issues.map(i => `<div class="irow"><span class="tag ${['critical', 'serious', 'moderate', 'minor'].includes(i.impact) ? i.impact : 'minor'}">${esc(i.impact)}</span><div><div class="ihelp">${esc(i.help || i.id)} <span class="muted">×${i.count}</span></div>${i.description ? `<div class="idesc">${esc(i.description)}</div>` : ''}${i.sample.length ? `<div class="isel">${esc(i.sample.join('  ·  '))}</div>` : ''}</div></div>`).join('')
+    const seoList = seo.length === 0
+      ? `<p class="ok">No SEO issues</p>`
+      : seo.map(f => `<div class="irow"><span class="tag ${f.status === 'fail' ? 'fail' : 'warn'}">${esc(f.status)}</span><div><div class="ihelp">${esc(f.label)}</div>${f.detail ? `<div class="idesc">${esc(f.detail)}</div>` : ''}</div></div>`).join('')
+    return `<div class="dcard"><div class="ctitle">${esc(title)}</div>
+      <div class="dsec">Accessibility (${issues.length})</div>${a11y}
+      <div class="dsec">Technical SEO (${seo.length})</div>${seoList}</div>`
+  }
+
   const you = rep.result.you, comp = rep.result.competitor
+  const hasDetail = (you.ok || comp.ok) && (((you.issues || []).length + (comp.issues || []).length + (you.seoFailures || []).length + (comp.seoFailures || []).length) > 0)
   const seoWin = (you.seoScore ?? -1) - (comp.seoScore ?? -1)
   const a11yWin = comp.a11yIssues - you.a11yIssues
   const verdict = (you.ok && comp.ok)
@@ -93,6 +111,18 @@ export function buildCompetitorHtml(rep: CompetitorReport): string {
     .big { font-size:30px; font-weight:700; } .lbl { font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.05em; }
     .verdict { margin-top:18px; padding:14px; background:#faf7ec; border:1px solid #ecdca0; border-radius:10px; font-size:14px; }
     .foot { margin-top:24px; color:#94a3b8; font-size:11px; text-align:center; }
+    .dtitle { font-weight:700; font-size:16px; margin:24px 0 8px; border-top:1px solid #e2e8f0; padding-top:16px; }
+    .dcols { display:flex; gap:16px; }
+    .dcard { flex:1; border:1px solid #e2e8f0; border-radius:12px; padding:14px; }
+    .dsec { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; margin:12px 0 4px; }
+    .irow { display:flex; gap:6px; padding:5px 0; border-bottom:1px solid #f1f5f9; }
+    .tag { flex-shrink:0; font-size:9px; font-weight:700; text-transform:uppercase; padding:2px 5px; border-radius:4px; height:fit-content; }
+    .tag.fail { background:#fee2e2; color:#b91c1c; } .tag.warn { background:#fef3c7; color:#b45309; }
+    .tag.critical { background:#fee2e2; color:#b91c1c; } .tag.serious { background:#ffedd5; color:#c2410c; }
+    .tag.moderate { background:#fef3c7; color:#b45309; } .tag.minor { background:#f1f5f9; color:#475569; }
+    .ihelp { font-size:12px; font-weight:600; color:#1e293b; } .idesc { font-size:11px; color:#64748b; }
+    .isel { font-size:10px; color:#94a3b8; font-family:monospace; word-break:break-all; }
+    .ok { font-size:12px; color:#16a34a; padding:4px 0; }
   </style></head><body>
     <div class="head">
       <div><div class="brand">Accessly</div><h1>Competitor Analysis</h1><p class="muted">${esc(rep.your_url)} vs ${esc(rep.competitor_url)}</p></div>
@@ -100,6 +130,7 @@ export function buildCompetitorHtml(rep: CompetitorReport): string {
     </div>
     <div class="cols">${col('Your site', you)}${col('Competitor', comp)}</div>
     ${verdict ? `<div class="verdict">${esc(verdict)}</div>` : ''}
+    ${hasDetail ? `<div class="dtitle">Full issue breakdown</div><div class="dcols">${detailCol('Your site', you)}${detailCol('Competitor', comp)}</div>` : ''}
     <div class="foot">Generated by Accessly · ${when}</div>
   </body></html>`
 }

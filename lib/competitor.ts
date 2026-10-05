@@ -4,6 +4,26 @@ import { runCrawl, type PageAuditResult } from '@/lib/audit'
 // Runs a single-page accessibility + technical-SEO audit against a URL and
 // returns headline scores. Used to compare your site vs. a competitor's.
 
+// A single accessibility rule that failed, with enough detail to act on it.
+export type IssueDetail = {
+  id: string            // axe rule id, e.g. "color-contrast"
+  impact: string        // critical | serious | moderate | minor
+  description: string
+  help: string
+  helpUrl: string | null
+  count: number         // how many elements failed this rule
+  sample: string[]      // up to 3 example CSS selectors
+}
+
+// A single technical-SEO check that failed or warned.
+export type SeoFailure = {
+  id: string
+  label: string
+  status: 'warn' | 'fail'
+  detail: string
+  weight: number
+}
+
 export type Scorecard = {
   url: string
   ok: boolean
@@ -16,7 +36,12 @@ export type Scorecard = {
   minor: number
   seoScore: number | null
   seoIssues: number | null
+  // Full detail of WHAT failed (not just counts) — for the side-by-side view.
+  issues: IssueDetail[]
+  seoFailures: SeoFailure[]
 }
+
+const IMPACT_ORDER: Record<string, number> = { critical: 0, serious: 1, moderate: 2, minor: 3 }
 
 export function normalizeUrl(input: string): string | null {
   let u = input.trim()
@@ -38,14 +63,41 @@ export async function runScorecard(url: string): Promise<Scorecard> {
 
   const r = result as PageAuditResult | null
   if (!r) {
-    return { url, ok: false, statusCode: null, error: 'Could not load page', a11yIssues: 0, critical: 0, serious: 0, moderate: 0, minor: 0, seoScore: null, seoIssues: null }
+    return { url, ok: false, statusCode: null, error: 'Could not load page', a11yIssues: 0, critical: 0, serious: 0, moderate: 0, minor: 0, seoScore: null, seoIssues: null, issues: [], seoFailures: [] }
   }
-  const seoIssues = r.seo ? r.seo.checks.filter(c => c.weight > 0 && c.status !== 'pass').length : null
+
+  // Extract the actual accessibility violations (axe + our custom checks),
+  // sorted most-severe first, with a few sample selectors each.
+  const rawViolations = Array.isArray(r.results) ? r.results : []
+  const issues: IssueDetail[] = rawViolations.map(v => {
+    const vv = v as { id?: string; impact?: string; description?: string; help?: string; helpUrl?: string; nodes?: Array<{ target?: string[] }> }
+    const nodes = Array.isArray(vv.nodes) ? vv.nodes : []
+    return {
+      id: vv.id || 'unknown',
+      impact: vv.impact || 'minor',
+      description: vv.description || '',
+      help: vv.help || '',
+      helpUrl: vv.helpUrl || null,
+      count: nodes.length,
+      sample: nodes.slice(0, 3).map(n => (n.target && n.target[0]) || '').filter(Boolean),
+    }
+  })
+  issues.sort((a, b) => (IMPACT_ORDER[a.impact] ?? 4) - (IMPACT_ORDER[b.impact] ?? 4))
+
+  // The SEO checks that failed or warned (scored checks only).
+  const seoFailures: SeoFailure[] = r.seo
+    ? r.seo.checks
+        .filter(c => c.weight > 0 && c.status !== 'pass')
+        .map(c => ({ id: c.id, label: c.label, status: c.status as 'warn' | 'fail', detail: c.detail, weight: c.weight }))
+    : []
+
   return {
     url, ok: !r.error, statusCode: r.statusCode, error: r.error,
     a11yIssues: r.violations, critical: r.critical, serious: r.serious, moderate: r.moderate, minor: r.minor,
     seoScore: r.seo ? r.seo.score : null,
-    seoIssues,
+    seoIssues: seoFailures.length,
+    issues,
+    seoFailures,
   }
 }
 
