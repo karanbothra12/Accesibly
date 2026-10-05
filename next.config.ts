@@ -6,6 +6,17 @@ const nextConfig: NextConfig = {
   // axe inject an empty ruleset and silently report zero violations.
   serverExternalPackages: ['playwright', 'playwright-core', '@sparticuz/chromium', '@axe-core/playwright', 'axe-core'],
 
+  // On Vercel/Lambda, @vercel/nft can't trace the files Playwright + @sparticuz
+  // load at runtime (e.g. playwright-core/browsers.json, the Chromium binary),
+  // so they're dropped from the serverless bundle and the function throws
+  // "Cannot find module '…/playwright-core/browsers.json'". Force-include the
+  // whole packages into every route that launches a browser (crawl + PDF).
+  outputFileTracingIncludes: {
+    '/api/audits': ['./node_modules/playwright-core/**/*', './node_modules/@sparticuz/chromium/**/*'],
+    '/api/audits/**': ['./node_modules/playwright-core/**/*', './node_modules/@sparticuz/chromium/**/*'],
+    '/api/competitor/**': ['./node_modules/playwright-core/**/*', './node_modules/@sparticuz/chromium/**/*'],
+  },
+
   // Allow widget to be served with correct CORS headers
   async headers() {
     return [
