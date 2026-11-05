@@ -7,6 +7,24 @@ import {
 import { ensureCentralAgent, saveSyntheticResult } from '@/lib/monitoring/agents'
 import { runDiagnostic, type DiagKind } from '@/lib/monitoring/diagnostics'
 import { detectIncidents } from '@/lib/monitoring/incidents'
+import { enrichIp } from '@/lib/monitoring/geoip'
+
+// Add location + ISP/ASN to each public traceroute hop (best-effort, cached).
+async function enrichHops(summary: Record<string, unknown> | null): Promise<Record<string, unknown> | null> {
+  if (!summary || !Array.isArray(summary.hops)) return summary
+  const isPriv = (ip: string) => /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip)
+  const hops = summary.hops as { hop: number; host: string; rttMs: number | null }[]
+  const out = []
+  for (const h of hops) {
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(h.host) || isPriv(h.host)) {
+      out.push({ ...h, private: /^\d/.test(h.host) && isPriv(h.host) })
+      continue
+    }
+    const intel = await enrichIp(h.host).catch(() => null)
+    out.push({ ...h, city: intel?.city ?? null, country: intel?.countryCode ?? null, isp: intel?.isp ?? null, asn: intel?.asn ?? null })
+  }
+  return { ...summary, hops: out }
+}
 
 // ── Monitoring scheduler + central-agent processor ────────────────────────────
 // Mirrors lib/monitor-runner.ts but with MINUTE cadences (1/5/10/15/30). Turns due
@@ -75,11 +93,12 @@ export async function drainCentralMonitoringJobs(agentId: number, max = 50): Pro
       if (job.job_type === 'diagnostic') {
         const kind = ((job.payload?.kind as string) || 'ping') as DiagKind
         const diag = await runDiagnostic(kind, w.url)
+        const summary = kind === 'traceroute' ? await enrichHops(diag.summary) : diag.summary
         await query(
           `INSERT INTO network_diagnostics (website_id, agent_id, job_id, kind, target, success, summary, raw, error)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
           [job.website_id, agentId, job.id, diag.kind, diag.target, diag.success,
-           diag.summary ? JSON.stringify(diag.summary) : null, diag.raw, diag.error]
+           summary ? JSON.stringify(summary) : null, diag.raw, diag.error]
         )
         await completeMonitoringJob(job.id, agentId)
         done++
