@@ -35,6 +35,8 @@ services:
         value: "5000"
       - key: WORKER_STALL_MINUTES
         value: "15"
+      - key: MONITORING_ENABLED        # run Internet-Monitoring checks as central agent #1
+        value: "1"
       - key: VNU_URL                     # internal address of the validator below
         value: "http://accessly-vnu:8888"
       # CSS validation needs a SEPARATE Jigsaw image — leave unset for the pilot

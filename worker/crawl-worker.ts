@@ -18,9 +18,13 @@
  */
 import { nextQueuedCrawlJobId, requeueStalledCrawlJobs, processCrawlJob } from '@/lib/audit-runner'
 import { enqueueDueMonitors, finalizeMonitorJob } from '@/lib/monitor-runner'
+import { runMonitoringTick } from '@/lib/monitoring/scheduler'
 
 const POLL_MS = Number(process.env.WORKER_POLL_MS || 5000)
 const STALL_MINUTES = Number(process.env.WORKER_STALL_MINUTES || 15)
+// Internet-Monitoring: when enabled, this worker also schedules + runs synthetic
+// checks as the in-process central agent (agent #1). Disabled by default.
+const MONITORING_ENABLED = process.env.MONITORING_ENABLED === '1'
 
 let running = true
 let draining = false
@@ -44,6 +48,17 @@ async function drainQueue(): Promise<void> {
     if (queued > 0) log(`enqueued ${queued} scheduled monitor(s)`)
   } catch (err) {
     log('monitor-enqueue error', err)
+  }
+
+  // Internet Performance Monitoring: recover leases, schedule due checks, and run
+  // them as the central agent (agent #1). Remote agents poll the API independently.
+  if (MONITORING_ENABLED) {
+    try {
+      const { recovered, enqueued, processed } = await runMonitoringTick()
+      if (recovered || enqueued || processed) log(`monitoring: recovered ${recovered}, enqueued ${enqueued}, processed ${processed}`)
+    } catch (err) {
+      log('monitoring-tick error', err)
+    }
   }
 
   // Process queued jobs one at a time until the queue is empty.

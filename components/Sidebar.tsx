@@ -28,6 +28,16 @@ const navGroups: { label: string; items: { href: string; label: string; icon: st
     ],
   },
   {
+    label: 'Internet Monitoring',
+    items: [
+      { href: '/dashboard/internet-monitoring', label: 'Overview', icon: '🌐' },
+      { href: '/dashboard/internet-monitoring/websites', label: 'Websites', icon: '⊡' },
+      { href: '/dashboard/internet-monitoring/agents', label: 'Agents', icon: '📡' },
+      { href: '/dashboard/internet-monitoring/diagnostics', label: 'Diagnostics', icon: '🩺' },
+      { href: '/dashboard/internet-monitoring/settings', label: 'Settings', icon: '⚙' },
+    ],
+  },
+  {
     label: 'Account',
     items: [
       { href: '/dashboard/billing', label: 'Plan & Usage', icon: '◔' },
@@ -49,8 +59,10 @@ export default function Sidebar({ fullName, email }: { fullName: string; email: 
   }
 
   const initials = fullName.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()
+  // Exact-match for section landing pages that are prefixes of their sub-pages.
+  const EXACT = new Set(['/dashboard', '/dashboard/internet-monitoring'])
   const isActive = (href: string) =>
-    href === '/dashboard' ? pathname === '/dashboard' : pathname === href || pathname.startsWith(href + '/')
+    EXACT.has(href) ? pathname === href : pathname === href || pathname.startsWith(href + '/')
 
   const Inner = (
     <>

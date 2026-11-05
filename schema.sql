@@ -703,3 +703,169 @@ ALTER TABLE competitor_reports ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEF
   CHECK (status IN ('pending','running','done','failed'));
 ALTER TABLE competitor_reports ADD COLUMN IF NOT EXISTS error TEXT;
 ALTER TABLE competitor_reports ALTER COLUMN result DROP NOT NULL;
+
+-- ══════════════════════════════════════════════════════════════════
+-- Internet Performance Monitoring (Mini-Catchpoint) — Phase 1
+-- ══════════════════════════════════════════════════════════════════
+-- Distributed synthetic uptime + performance monitoring. Isolated from the audit
+-- product's `sites`/`crawl_jobs`. Agents poll an authenticated API and NEVER touch
+-- this DB directly. Synthetic results are stored separately from RUM, never mixed.
+
+-- Registered monitoring targets (separate lifecycle from `sites`).
+CREATE TABLE IF NOT EXISTS monitored_websites (
+  id                  SERIAL PRIMARY KEY,
+  merchant_id         INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  name                TEXT NOT NULL,
+  url                 TEXT NOT NULL,
+  description         TEXT,
+  frequency_minutes   INTEGER NOT NULL DEFAULT 5 CHECK (frequency_minutes IN (1,5,10,15,30)),
+  expected_status     INTEGER NOT NULL DEFAULT 200,
+  timeout_ms          INTEGER NOT NULL DEFAULT 30000,
+  alert_threshold_ms  INTEGER,                          -- optional response-time alert (Phase 4)
+  monitoring_type     TEXT NOT NULL DEFAULT 'http' CHECK (monitoring_type IN ('http')),
+  agent_ids           INTEGER[] NOT NULL DEFAULT '{}',  -- selected agents ('{}' = all active)
+  enabled             BOOLEAN NOT NULL DEFAULT FALSE,   -- can only enable once verified
+  verified            BOOLEAN NOT NULL DEFAULT FALSE,   -- domain-ownership verified
+  verification_token  TEXT NOT NULL DEFAULT gen_random_uuid()::text,
+  verification_method TEXT,                             -- 'dns-txt' | 'meta' | 'file'
+  verified_at         TIMESTAMPTZ,
+  last_checked_at     TIMESTAMPTZ,
+  next_run_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS monitored_websites_merchant_idx ON monitored_websites(merchant_id);
+CREATE INDEX IF NOT EXISTS monitored_websites_due_idx ON monitored_websites(enabled, verified, next_run_at);
+
+-- Monitoring agents. The central worker self-registers as agent #1 ('central');
+-- remote VPS agents ('remote') register via the authenticated API and join later.
+CREATE TABLE IF NOT EXISTS monitoring_agents (
+  id                SERIAL PRIMARY KEY,
+  agent_key         UUID NOT NULL DEFAULT gen_random_uuid(),   -- public identifier
+  name              TEXT NOT NULL,
+  kind              TEXT NOT NULL DEFAULT 'remote' CHECK (kind IN ('central','remote')),
+  country_code      TEXT,
+  city              TEXT,
+  region            TEXT,
+  public_ip         TEXT,
+  isp               TEXT,             -- enriched later (Phase 2); never fabricated
+  asn               INTEGER,
+  asn_org           TEXT,
+  network_type      TEXT,             -- 'datacenter' | 'residential' | 'mobile' | 'unknown'
+  version           TEXT,
+  status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','active','offline','disabled')),
+  last_heartbeat_at TIMESTAMPTZ,
+  last_success_at   TIMESTAMPTZ,
+  jobs_succeeded    BIGINT NOT NULL DEFAULT 0,
+  jobs_failed       BIGINT NOT NULL DEFAULT 0,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS monitoring_agents_key_idx ON monitoring_agents(agent_key);
+
+-- Per-agent credential: opaque bearer token, HASHED at rest (never store plaintext).
+CREATE TABLE IF NOT EXISTS agent_credentials (
+  id           SERIAL PRIMARY KEY,
+  agent_id     INTEGER NOT NULL REFERENCES monitoring_agents(id) ON DELETE CASCADE,
+  token_hash   TEXT NOT NULL,          -- sha256 hex of the bearer token
+  token_prefix TEXT NOT NULL,          -- first chars, for lookup/audit (non-secret)
+  revoked      BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_used_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS agent_credentials_agent_idx ON agent_credentials(agent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_credentials_hash_idx ON agent_credentials(token_hash);
+
+-- Heartbeat history (current state is also denormalized onto monitoring_agents).
+CREATE TABLE IF NOT EXISTS agent_heartbeats (
+  id           BIGSERIAL PRIMARY KEY,
+  agent_id     INTEGER NOT NULL REFERENCES monitoring_agents(id) ON DELETE CASCADE,
+  public_ip    TEXT,
+  current_jobs INTEGER,
+  failed_jobs  INTEGER,
+  meta         JSONB,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS agent_heartbeats_agent_time_idx ON agent_heartbeats(agent_id, created_at DESC);
+
+-- Monitoring job queue — multi-agent safe (claimed with FOR UPDATE SKIP LOCKED).
+-- Unlike crawl_jobs (serial, single worker), many agents poll this concurrently.
+CREATE TABLE IF NOT EXISTS monitoring_jobs (
+  id            BIGSERIAL PRIMARY KEY,
+  website_id    INTEGER NOT NULL REFERENCES monitored_websites(id) ON DELETE CASCADE,
+  agent_id      INTEGER REFERENCES monitoring_agents(id) ON DELETE SET NULL, -- NULL = any agent
+  job_type      TEXT NOT NULL DEFAULT 'http_check' CHECK (job_type IN ('http_check','diagnostic')),
+  status        TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','done','failed','dead')),
+  payload       JSONB,
+  priority      INTEGER NOT NULL DEFAULT 0,
+  scheduled_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  max_attempts  INTEGER NOT NULL DEFAULT 3,
+  locked_at     TIMESTAMPTZ,
+  locked_by     INTEGER REFERENCES monitoring_agents(id) ON DELETE SET NULL,
+  last_error    TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS monitoring_jobs_claim_idx ON monitoring_jobs(scheduled_at) WHERE status = 'queued';
+CREATE INDEX IF NOT EXISTS monitoring_jobs_website_idx ON monitoring_jobs(website_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS monitoring_jobs_lease_idx ON monitoring_jobs(status, locked_at);
+
+-- Synthetic measurement results (high volume; SEPARATE from RUM — never mixed).
+CREATE TABLE IF NOT EXISTS synthetic_results (
+  id            BIGSERIAL PRIMARY KEY,
+  website_id    INTEGER NOT NULL REFERENCES monitored_websites(id) ON DELETE CASCADE,
+  agent_id      INTEGER REFERENCES monitoring_agents(id) ON DELETE SET NULL,
+  job_id        BIGINT,
+  measured_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- source dimensions (denormalized for fast analytics; ISP/ASN enriched in Phase 2)
+  country_code  TEXT,
+  isp           TEXT,
+  asn           INTEGER,
+  -- outcome
+  available     BOOLEAN NOT NULL,
+  status_code   INTEGER,
+  error_type    TEXT,            -- 'dns'|'tcp'|'tls'|'http'|'timeout'|'ssl'|null
+  error_detail  TEXT,
+  -- timing breakdown (milliseconds)
+  dns_ms        REAL,
+  tcp_ms        REAL,
+  tls_ms        REAL,
+  ttfb_ms       REAL,
+  download_ms   REAL,
+  total_ms      REAL,
+  redirect_ms   REAL,
+  response_size INTEGER,
+  resolved_ip   TEXT,
+  ssl_expiry    TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS synthetic_results_website_time_idx ON synthetic_results(website_id, measured_at DESC);
+CREATE INDEX IF NOT EXISTS synthetic_results_agent_time_idx   ON synthetic_results(agent_id, measured_at DESC);
+CREATE INDEX IF NOT EXISTS synthetic_results_asn_time_idx     ON synthetic_results(asn, measured_at DESC);
+CREATE INDEX IF NOT EXISTS synthetic_results_country_time_idx ON synthetic_results(country_code, measured_at DESC);
+
+-- Feature + limits (data-driven; mirrors the scheduled_monitoring precedent above).
+INSERT INTO features (key, label, description, sort_order) VALUES
+  ('internet_monitoring', 'Internet Performance Monitoring', 'Global synthetic uptime + performance monitoring from distributed agents', 11)
+ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO plan_features (plan_id, feature_key, enabled)
+SELECT p.id, 'internet_monitoring', CASE WHEN p.key IN ('growth','enterprise') THEN TRUE ELSE FALSE END
+FROM plans p
+ON CONFLICT (plan_id, feature_key) DO NOTHING;
+
+INSERT INTO limit_definitions (key, label, period, unit, sort_order) VALUES
+  ('monitored_websites',            'Monitored websites',            'none', 'sites',   24),
+  ('min_monitor_frequency_minutes', 'Fastest check frequency (min)', 'none', 'minutes', 25)
+ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO plan_limits (plan_id, limit_key, limit_value)
+SELECT p.id, d.key,
+  CASE d.key
+    WHEN 'monitored_websites'            THEN CASE p.key WHEN 'starter' THEN 0 WHEN 'growth' THEN 10 ELSE -1 END
+    WHEN 'min_monitor_frequency_minutes' THEN CASE p.key WHEN 'starter' THEN 0 WHEN 'growth' THEN 5  ELSE 1 END
+    ELSE 0
+  END
+FROM plans p CROSS JOIN limit_definitions d
+WHERE d.key IN ('monitored_websites','min_monitor_frequency_minutes')
+ON CONFLICT (plan_id, limit_key) DO NOTHING;
