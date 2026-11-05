@@ -63,11 +63,19 @@ const ipinfoProvider = (token: string): GeoProvider => ({
 
 // MaxMind GeoLite2 adapter — reads local .mmdb files via the optional `maxmind`
 // package. Only active when MAXMIND_ASN_DB is set AND the package is installed.
+// Load the optional `maxmind` package at RUNTIME only. Using new Function hides the
+// dynamic import from webpack/turbopack static analysis, so the build doesn't try to
+// resolve the (optional, uninstalled) package. If it's not installed, this throws and
+// we fall back to null — i.e. maxmind support is purely opt-in via `npm i maxmind`.
+type MaxmindReader = { get(ip: string): unknown }
+type MaxmindModule = { open(path: string): Promise<MaxmindReader> }
+const importOptional = new Function('m', 'return import(m)') as (m: string) => Promise<MaxmindModule>
+
 const maxmindProvider = (asnDb: string, cityDb?: string): GeoProvider => ({
   name: 'maxmind',
   async lookup(ip) {
     try {
-      const maxmind = await import('maxmind' as string).catch(() => null)
+      const maxmind = await importOptional('maxmind').catch(() => null)
       if (!maxmind) return null
       const asnReader = await maxmind.open(asnDb)
       const asnRec = asnReader.get(ip) as { autonomous_system_number?: number; autonomous_system_organization?: string } | null

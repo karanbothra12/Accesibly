@@ -13,7 +13,7 @@ async function getSession() {
 export default async function MonitoringSettingsPage() {
   const session = await getSession()
   const superadmin = await isSuperadmin(session.merchantId)
-  const ent = await getEntitlements(session.merchantId)
+  const ent = await getEntitlements(session.merchantId!) // layout guarantees auth
   const available = superadmin || !!ent?.features['internet_monitoring']
   const websiteLimit = superadmin ? -1 : (ent ? getLimit(ent, 'monitored_websites') : 0)
   const minFreq = superadmin ? 1 : (ent ? getLimit(ent, 'min_monitor_frequency_minutes') : 0)

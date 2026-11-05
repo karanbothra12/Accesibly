@@ -12,7 +12,7 @@ async function getSession() {
 
 export default async function InternetMonitoringOverview() {
   const session = await getSession()
-  const merchantId = session.merchantId
+  const merchantId = session.merchantId! // dashboard layout guarantees an authenticated merchant
   const ent = await getEntitlements(merchantId)
   const available = !!ent?.features['internet_monitoring']
 
