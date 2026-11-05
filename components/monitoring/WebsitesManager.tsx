@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { StatCard, Card, CardHeader } from '@/components/dashboard/ui'
 import MiniChart, { type Point } from '@/components/dashboard/MiniChart'
+import Waterfall from '@/components/monitoring/Waterfall'
 
 type Website = {
   id: number; name: string; url: string; description: string | null
@@ -223,17 +224,20 @@ function ResultsPanel({ websiteId }: { websiteId: number }) {
   }, [websiteId, period])
 
   useEffect(() => { let alive = true; (async () => { if (alive) await load() })(); return () => { alive = false } }, [load])
+  // Live auto-refresh while viewing (checks land asynchronously from the worker/agents).
+  useEffect(() => { const t = setInterval(() => { load() }, 20000); return () => clearInterval(t) }, [load])
 
   if (loading && !data) return <p className="text-sm text-slate-400">Loading measurements…</p>
   const s = data?.summary
   const rows = data?.results ?? []
+  const latest = rows[0]
   // Oldest → newest for the chart.
   const chart: Point[] = [...rows].reverse().filter(r => r.total_ms != null).map(r => ({ x: r.measured_at, y: r.total_ms! }))
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-slate-400">Synthetic checks — measured from Accessly agents.</p>
+        <p className="text-xs text-slate-400 flex items-center gap-1.5"><span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Live · synthetic checks from Accessly agents</p>
         <select value={period} onChange={e => setPeriod(e.target.value)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 bg-white">
           <option value="24h">Last 24h</option><option value="7d">Last 7d</option><option value="30d">Last 30d</option>
         </select>
@@ -254,6 +258,12 @@ function ResultsPanel({ websiteId }: { websiteId: number }) {
             <StatCard label="Avg TLS" value={ms(s.avgTls)} />
             <StatCard label="Avg TTFB" value={ms(s.avgTtfb)} />
           </div>
+          {latest && latest.available && (
+            <Card className="p-4">
+              <p className="text-xs font-semibold text-slate-500 mb-2">Latest check — connection waterfall <span className="font-normal text-slate-400">({new Date(latest.measured_at).toLocaleTimeString()})</span></p>
+              <Waterfall phases={{ dns: latest.dns_ms, tcp: latest.tcp_ms, tls: latest.tls_ms, ttfb: latest.ttfb_ms, download: latest.download_ms }} />
+            </Card>
+          )}
           <Card className="p-4">
             <MiniChart title="Total response time" points={chart} color="#6366f1" format={v => `${Math.round(v)}ms`} formatX={x => new Date(x).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} />
           </Card>

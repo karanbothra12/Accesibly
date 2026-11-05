@@ -54,8 +54,13 @@ export async function enqueueDueMonitoringChecks(): Promise<number> {
 
 type JobWebsite = { url: string; expected_status: number; timeout_ms: number }
 
-// Run queued jobs as the in-process central agent (the Singapore worker = agent #1).
+// Run queued jobs as the in-process central agent (the worker = agent #1).
 export async function drainCentralMonitoringJobs(agentId: number, max = 50): Promise<number> {
+  // The central agent's own network dimensions (so its results carry ISP/ASN too).
+  const dims = await queryOne<{ country_code: string | null; isp: string | null; asn: number | null }>(
+    'SELECT country_code, isp, asn FROM monitoring_agents WHERE id = $1', [agentId]
+  ) || { country_code: null, isp: null, asn: null }
+
   let done = 0
   for (let i = 0; i < max; i++) {
     const job = await claimMonitoringJob(agentId)
@@ -82,7 +87,8 @@ export async function drainCentralMonitoringJobs(agentId: number, max = 50): Pro
       }
 
       const result = await runHttpCheck(w.url, { expectedStatus: w.expected_status, timeoutMs: w.timeout_ms })
-      await saveSyntheticResult(job.website_id, agentId, job.id, result)
+      await saveSyntheticResult(job.website_id, agentId, job.id, result,
+        { countryCode: dims.country_code, isp: dims.isp, asn: dims.asn })
       await completeMonitoringJob(job.id, agentId)
       done++
     } catch (e) {

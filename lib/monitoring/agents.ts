@@ -104,13 +104,14 @@ export async function enrichAgentNetwork(agentId: number, ip: string): Promise<v
   } catch { /* best-effort */ }
 }
 
-// Upsert the in-process central agent (the Singapore worker runs as "agent #1").
+// Upsert the in-process central agent (the worker runs as "agent #1").
 export async function ensureCentralAgent(name = 'central-worker'): Promise<number> {
-  const existing = await queryOne<{ id: number }>(
-    `SELECT id FROM monitoring_agents WHERE kind = 'central' ORDER BY id ASC LIMIT 1`
+  const existing = await queryOne<{ id: number; public_ip: string | null }>(
+    `SELECT id, public_ip FROM monitoring_agents WHERE kind = 'central' ORDER BY id ASC LIMIT 1`
   )
   if (existing) {
     await query(`UPDATE monitoring_agents SET last_heartbeat_at = NOW(), status = 'active' WHERE id = $1`, [existing.id])
+    if (!existing.public_ip) await discoverCentralIp(existing.id)
     return existing.id
   }
   const row = await queryOne<{ id: number }>(
@@ -118,7 +119,19 @@ export async function ensureCentralAgent(name = 'central-worker'): Promise<numbe
      VALUES ($1, 'central', 'active', NOW()) RETURNING id`,
     [name]
   )
+  await discoverCentralIp(row!.id)
   return row!.id
+}
+
+// The central agent has no inbound heartbeat, so it learns its own public IP once
+// (then enriches ISP/ASN/location so it appears on the map). Best-effort.
+async function discoverCentralIp(agentId: number): Promise<void> {
+  try {
+    const ip = (await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(5000) }).then(r => r.text())).trim()
+    if (!ip || !/^[\d.]+$|:/.test(ip)) return
+    await query(`UPDATE monitoring_agents SET public_ip = $2 WHERE id = $1 AND public_ip IS NULL`, [agentId, ip])
+    await enrichAgentNetwork(agentId, ip)
+  } catch { /* best-effort */ }
 }
 
 // Persist a synthetic measurement + update rollup counters. countryCode/isp/asn are
