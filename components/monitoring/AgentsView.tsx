@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { StatCard, Card, CardHeader } from '@/components/dashboard/ui'
+import WorldMap from '@/components/monitoring/WorldMap'
 
 type Agent = {
   id: number; agent_key: string; name: string; kind: 'central' | 'remote'
   country_code: string | null; city: string | null; region: string | null; status: string
+  latitude: number | null; longitude: number | null
   last_heartbeat_at: string | null; last_success_at: string | null
   jobs_succeeded: number; jobs_failed: number; isp: string | null; asn: number | null; version: string | null; online: boolean
 }
@@ -55,6 +57,11 @@ export default function AgentsView({ isSuperadmin }: { isSuperadmin: boolean }) 
         <StatCard label="Offline" value={String(agents.length - online)} />
         <StatCard label="Central" value={String(agents.filter(a => a.kind === 'central').length)} />
       </div>
+
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold text-slate-900 mb-3">Agent map</h3>
+        <WorldMap agents={agents} />
+      </Card>
 
       <Card className="px-5 py-3 text-xs text-slate-500">
         A cloud VPS is <span className="font-semibold">not</span> a retail ISP. To compare ISPs (e.g. Airtel vs Jio), deploy agents actually homed on those networks — otherwise results reflect data-centre connectivity, which we label as such.

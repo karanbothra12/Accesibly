@@ -869,3 +869,81 @@ SELECT p.id, d.key,
 FROM plans p CROSS JOIN limit_definitions d
 WHERE d.key IN ('monitored_websites','min_monitor_frequency_minutes')
 ON CONFLICT (plan_id, limit_key) DO NOTHING;
+
+-- ══════════════════════════════════════════════════════════════════
+-- Internet Performance Monitoring — Phases 2–5
+-- ══════════════════════════════════════════════════════════════════
+
+-- Phase 2: IP intelligence cache (ISP/ASN). Keyed by IP; refreshed periodically.
+-- Stored separately from raw measurements so we can swap providers + cache cheaply.
+CREATE TABLE IF NOT EXISTS ip_intelligence (
+  ip           TEXT PRIMARY KEY,
+  asn          INTEGER,
+  asn_org      TEXT,
+  isp          TEXT,
+  country_code TEXT,
+  city         TEXT,
+  network_type TEXT,                 -- 'datacenter' | 'residential' | 'mobile' | 'unknown'
+  source       TEXT,                 -- 'maxmind' | 'ipinfo' | 'none'
+  enriched_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Agents gain an approximate location for the world map (Phase 5), filled on enrich.
+ALTER TABLE monitoring_agents ADD COLUMN IF NOT EXISTS latitude REAL;
+ALTER TABLE monitoring_agents ADD COLUMN IF NOT EXISTS longitude REAL;
+
+-- Phase 3: RUM gains ISP/ASN (derived server-side from the request IP, which is
+-- NOT stored — only the resolved ISP/ASN is kept, preserving the privacy design).
+ALTER TABLE rum_page_views ADD COLUMN IF NOT EXISTS asn INTEGER;
+ALTER TABLE rum_page_views ADD COLUMN IF NOT EXISTS isp TEXT;
+CREATE INDEX IF NOT EXISTS rum_page_views_asn_idx ON rum_page_views(site_id, asn);
+
+-- Phase 4: on-demand network diagnostics (ping / traceroute / dns), run by agents.
+CREATE TABLE IF NOT EXISTS network_diagnostics (
+  id          BIGSERIAL PRIMARY KEY,
+  website_id  INTEGER REFERENCES monitored_websites(id) ON DELETE CASCADE,
+  agent_id    INTEGER REFERENCES monitoring_agents(id) ON DELETE SET NULL,
+  job_id      BIGINT,
+  kind        TEXT NOT NULL CHECK (kind IN ('ping','traceroute','dns')),
+  target      TEXT NOT NULL,
+  success     BOOLEAN NOT NULL DEFAULT FALSE,
+  summary     JSONB,                -- { rttAvgMs, lossPct, hops:[{hop,host,rttMs}], ... }
+  raw         TEXT,
+  error       TEXT,
+  measured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS network_diagnostics_website_idx ON network_diagnostics(website_id, measured_at DESC);
+
+-- Phase 4: incidents, opened/closed automatically from synthetic results.
+CREATE TABLE IF NOT EXISTS monitoring_incidents (
+  id             BIGSERIAL PRIMARY KEY,
+  website_id     INTEGER NOT NULL REFERENCES monitored_websites(id) ON DELETE CASCADE,
+  status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved','acknowledged')),
+  kind           TEXT NOT NULL DEFAULT 'down' CHECK (kind IN ('down','slow','ssl_expiry')),
+  cause_hypothesis TEXT,            -- evidence-based guess, clearly a hypothesis
+  failure_count  INTEGER NOT NULL DEFAULT 0,
+  last_error     TEXT,
+  started_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  detected_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  resolved_at    TIMESTAMPTZ,
+  acknowledged_at TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS monitoring_incidents_website_idx ON monitoring_incidents(website_id, status);
+-- At most one OPEN incident of a given kind per website (de-dupes alerts).
+CREATE UNIQUE INDEX IF NOT EXISTS monitoring_incidents_open_idx
+  ON monitoring_incidents(website_id, kind) WHERE status IN ('open','acknowledged');
+
+-- Phase 4: alert rules. website_id NULL = applies to all the merchant's websites.
+CREATE TABLE IF NOT EXISTS alert_configurations (
+  id          BIGSERIAL PRIMARY KEY,
+  merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  website_id  INTEGER REFERENCES monitored_websites(id) ON DELETE CASCADE,
+  condition   TEXT NOT NULL CHECK (condition IN ('down','slow','ssl_expiry','agent_offline')),
+  threshold   INTEGER,             -- ms for 'slow', days for 'ssl_expiry'
+  channel     TEXT NOT NULL DEFAULT 'email' CHECK (channel IN ('email','webhook','inapp')),
+  target      TEXT,                -- webhook URL (for channel='webhook')
+  enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS alert_configurations_merchant_idx ON alert_configurations(merchant_id);

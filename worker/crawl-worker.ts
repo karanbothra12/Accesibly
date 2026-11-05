@@ -54,8 +54,9 @@ async function drainQueue(): Promise<void> {
   // them as the central agent (agent #1). Remote agents poll the API independently.
   if (MONITORING_ENABLED) {
     try {
-      const { recovered, enqueued, processed } = await runMonitoringTick()
-      if (recovered || enqueued || processed) log(`monitoring: recovered ${recovered}, enqueued ${enqueued}, processed ${processed}`)
+      const t = await runMonitoringTick()
+      if (t.recovered || t.enqueued || t.processed || t.incidentsOpened || t.incidentsResolved)
+        log(`monitoring: recovered ${t.recovered}, enqueued ${t.enqueued}, processed ${t.processed}, incidents +${t.incidentsOpened}/-${t.incidentsResolved}`)
     } catch (err) {
       log('monitoring-tick error', err)
     }

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { query, queryOne } from '@/lib/db'
 import type { SyntheticResult } from '@/lib/monitoring/synthetic'
+import { enrichIp } from '@/lib/monitoring/geoip'
 
 // ── Monitoring agents: registration, auth, heartbeat ──────────────────────────
 // Agents authenticate with a per-agent opaque bearer token. Only its SHA-256 hash
@@ -82,6 +83,25 @@ export async function recordHeartbeat(
      VALUES ($1, $2, $3, $4, $5)`,
     [agentId, info.publicIp ?? null, info.currentJobs ?? null, info.failedJobs ?? null, info.meta ? JSON.stringify(info.meta) : null]
   )
+  if (info.publicIp) await enrichAgentNetwork(agentId, info.publicIp)
+}
+
+// Resolve an agent's public IP → ISP/ASN/location and store it on the agent
+// (best-effort; no-op when no IP-intelligence provider is configured).
+export async function enrichAgentNetwork(agentId: number, ip: string): Promise<void> {
+  try {
+    const intel = await enrichIp(ip)
+    if (!intel) return
+    await query(
+      `UPDATE monitoring_agents
+       SET isp = COALESCE($2, isp), asn = COALESCE($3, asn), asn_org = COALESCE($4, asn_org),
+           network_type = COALESCE($5, network_type),
+           country_code = COALESCE(country_code, $6), city = COALESCE(city, $7),
+           latitude = COALESCE($8, latitude), longitude = COALESCE($9, longitude)
+       WHERE id = $1`,
+      [agentId, intel.isp, intel.asn, intel.asnOrg, intel.networkType, intel.countryCode, intel.city, intel.latitude, intel.longitude]
+    )
+  } catch { /* best-effort */ }
 }
 
 // Upsert the in-process central agent (the Singapore worker runs as "agent #1").

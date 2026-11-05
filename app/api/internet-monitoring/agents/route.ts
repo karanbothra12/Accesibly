@@ -18,7 +18,7 @@ export async function GET() {
   const session = await getSession()
   if (!session.isLoggedIn || !session.merchantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const agents = await query(
-    `SELECT id, agent_key, name, kind, country_code, city, region, status,
+    `SELECT id, agent_key, name, kind, country_code, city, region, status, latitude, longitude,
             last_heartbeat_at, last_success_at, jobs_succeeded, jobs_failed, isp, asn, version,
             (last_heartbeat_at IS NOT NULL AND last_heartbeat_at > NOW() - INTERVAL '2 minutes') AS online
      FROM monitoring_agents ORDER BY kind, name`

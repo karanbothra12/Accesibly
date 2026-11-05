@@ -1,6 +1,6 @@
 import http from 'node:http'
 import https from 'node:https'
-import type { Socket } from 'node:net'
+import net, { type Socket } from 'node:net'
 import type { TLSSocket } from 'node:tls'
 import { resolveSafeTarget, type SafeTarget } from '@/lib/monitoring/ssrf-exec'
 import { UnsafeUrlError } from '@/lib/ssrf'
@@ -69,7 +69,7 @@ function requestOnce(target: SafeTarget, timeoutMs: number, userAgent: string): 
     const req = lib.request({
       host: target.ip,
       port: target.port,
-      servername: isHttps ? target.hostname : undefined, // TLS SNI + cert validation against the real name
+      servername: isHttps && !net.isIP(target.hostname) ? target.hostname : undefined, // TLS SNI (skip for literal IPs per RFC 6066)
       path,
       method: 'GET',
       family: target.family,

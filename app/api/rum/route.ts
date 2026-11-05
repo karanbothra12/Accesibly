@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query } from '@/lib/db'
 import { siteEntitlement } from '@/lib/entitlements'
+import { enrichIp, truncateIp } from '@/lib/monitoring/geoip'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -61,20 +62,32 @@ export async function POST(request: NextRequest) {
     const latitude = num(h.get('x-vercel-ip-latitude') || h.get('cf-iplatitude'))
     const longitude = num(h.get('x-vercel-ip-longitude') || h.get('cf-iplongitude'))
 
+    // ISP / ASN (Phase 3): derive from the request IP server-side, but we store
+    // ONLY the resolved ISP/ASN — the IP is truncated to /24 before lookup and
+    // never persisted, preserving the existing no-IP privacy design. No-op unless
+    // an IP-intelligence provider is configured.
+    let asn: number | null = null
+    let isp: string | null = null
+    try {
+      const fwd = (h.get('x-forwarded-for') || '').split(',')[0].trim() || h.get('x-real-ip') || ''
+      const intel = await enrichIp(truncateIp(fwd))
+      if (intel) { asn = intel.asn; isp = intel.isp }
+    } catch { /* best-effort */ }
+
     // Page view (with metrics) — one row.
     const p = body.p as Record<string, unknown> | undefined
     if (p && typeof p === 'object') {
       await query(
         `INSERT INTO rum_page_views
            (site_id, session_id, page_view_id, path, referrer, browser, browser_version, os, device_type,
-            connection, country, city, region, latitude, longitude,
+            connection, country, city, region, latitude, longitude, asn, isp,
             viewport_w, viewport_h, duration_ms, ttfb, fcp, lcp, inp, cls,
             dom_interactive, dom_content_loaded, load_time, nav_type, spa_fcp, spa_lcp)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)`,
         [
           siteId, sid, str(p.id, 128) ?? pvid, str(p.path, 1024) ?? '/', str(p.ref, 2048),
           str(p.br, 40), str(p.bv, 40), str(p.os, 40), str(p.dv, 20), str(p.cn, 20),
-          country, city, region, latitude, longitude,
+          country, city, region, latitude, longitude, asn, isp,
           num(p.vw), num(p.vh), num(p.dur),
           num(p.ttfb), num(p.fcp), num(p.lcp), num(p.inp), num(p.cls),
           num(p.di), num(p.dcl), num(p.lt),

@@ -5,6 +5,8 @@ import {
   requeueStalledMonitoringJobs, enqueueMonitoringJob,
 } from '@/lib/monitoring/queue'
 import { ensureCentralAgent, saveSyntheticResult } from '@/lib/monitoring/agents'
+import { runDiagnostic, type DiagKind } from '@/lib/monitoring/diagnostics'
+import { detectIncidents } from '@/lib/monitoring/incidents'
 
 // ── Monitoring scheduler + central-agent processor ────────────────────────────
 // Mirrors lib/monitor-runner.ts but with MINUTE cadences (1/5/10/15/30). Turns due
@@ -64,6 +66,21 @@ export async function drainCentralMonitoringJobs(agentId: number, max = 50): Pro
         [job.website_id]
       )
       if (!w) { await failMonitoringJob(job.id, agentId, 'website no longer exists'); continue }
+
+      if (job.job_type === 'diagnostic') {
+        const kind = ((job.payload?.kind as string) || 'ping') as DiagKind
+        const diag = await runDiagnostic(kind, w.url)
+        await query(
+          `INSERT INTO network_diagnostics (website_id, agent_id, job_id, kind, target, success, summary, raw, error)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [job.website_id, agentId, job.id, diag.kind, diag.target, diag.success,
+           diag.summary ? JSON.stringify(diag.summary) : null, diag.raw, diag.error]
+        )
+        await completeMonitoringJob(job.id, agentId)
+        done++
+        continue
+      }
+
       const result = await runHttpCheck(w.url, { expectedStatus: w.expected_status, timeoutMs: w.timeout_ms })
       await saveSyntheticResult(job.website_id, agentId, job.id, result)
       await completeMonitoringJob(job.id, agentId)
@@ -75,11 +92,13 @@ export async function drainCentralMonitoringJobs(agentId: number, max = 50): Pro
   return done
 }
 
-// One full monitoring tick for the worker: recover leases, schedule, drain.
-export async function runMonitoringTick(leaseSeconds = 90): Promise<{ recovered: number; enqueued: number; processed: number }> {
+// One full monitoring tick for the worker: recover leases, schedule, drain,
+// then detect/resolve incidents (which fires alerts).
+export async function runMonitoringTick(leaseSeconds = 90): Promise<{ recovered: number; enqueued: number; processed: number; incidentsOpened: number; incidentsResolved: number }> {
   const recovered = await requeueStalledMonitoringJobs(leaseSeconds)
   const enqueued = await enqueueDueMonitoringChecks()
   const agentId = await ensureCentralAgent()
   const processed = await drainCentralMonitoringJobs(agentId)
-  return { recovered, enqueued, processed }
+  const inc = await detectIncidents()
+  return { recovered, enqueued, processed, incidentsOpened: inc.opened, incidentsResolved: inc.resolved }
 }

@@ -89,9 +89,35 @@ RUN_DB_TESTS=1 DATABASE_URL=… \            # integration: SKIP LOCKED concurre
   npx tsx --env-file=.env.local node_modules/vitest/vitest.mjs run tests/monitoring-queue.test.ts
 ```
 
-## Deferred (later phases)
-- Phase 2: MaxMind GeoLite2 ISP/ASN enrichment (provider abstraction), ISP/Country/ASN analytics,
-  comparison + leaderboard.
-- Phase 3: RUM ISP/ASN enrichment on the existing pipeline.
-- Phase 4: traceroute/packet-loss diagnostics, incident detection + alert delivery, retention jobs.
-- Phase 5: interactive world map, advanced reports.
+## Phase 2 — ISP / ASN intelligence
+- Provider abstraction `lib/monitoring/geoip.ts` (MaxMind GeoLite2 or IPinfo, DB-cached in
+  `ip_intelligence`). Agents are enriched with ISP/ASN/location on heartbeat; synthetic results
+  inherit the agent's ISP/ASN. Never fabricates — returns "Unknown" when a provider can't resolve.
+- Analytics (`lib/monitoring/analytics.ts` + `/api/.../analytics`): ISP, Country and ASN pages with
+  avg/median/P95 latency, availability, phase breakdown, sample counts + confidence, and multi-select
+  comparison. Groups below the minimum sample count are hidden (no ranking on thin data).
+- **Env (pick one):** `IPINFO_TOKEN=…` **or** `MAXMIND_ASN_DB=/path/GeoLite2-ASN.mmdb`
+  (+ optional `MAXMIND_CITY_DB=…`; requires the `maxmind` npm package and a free MaxMind license).
+  Without a provider, enrichment is a no-op and dimensions show "Unknown".
+
+## Phase 3 — RUM ISP/ASN enrichment
+- The RUM ingest resolves the visitor's ISP/ASN server-side (same provider), storing ONLY the ISP/ASN
+  on `rum_page_views` — the IP is truncated to /24 before lookup and never persisted (privacy intact).
+
+## Phase 4 — Diagnostics, incidents, alerts
+- `lib/monitoring/diagnostics.ts`: on-demand ping / traceroute / DNS run by an agent (needs the system
+  tools; degrades to a clear "unavailable" otherwise). Triggered from the Diagnostics page.
+- `lib/monitoring/incidents.ts`: opens an incident after 3 consecutive failures with an evidence-based
+  cause hypothesis, auto-resolves on recovery, de-duped by a unique partial index. Runs in the worker tick.
+- Alerts: email (via the existing `notifyMerchant`/`email_outbox`) + webhooks (`alert_configurations`).
+  Managed on the Incidents page.
+
+## Phase 5 — Map, leaderboard, reports
+- Agents page shows a world map (equirectangular geo-plot of agent locations).
+- Reports page: ISP leaderboards (fastest / slowest / lowest availability, sample-gated) and raw-measurement
+  CSV export per website (`/api/.../reports/export`).
+
+## Still intentionally out of scope
+- Pre-aggregation rollup tables + retention-trimming jobs (analytics query raw at pilot scale).
+- Residential/mobile network classification (GeoLite2 free can't distinguish it; only datacenter is flagged).
+- Real multi-ISP data quality still depends on deploying agents genuinely homed on those networks.
