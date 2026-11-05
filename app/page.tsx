@@ -236,7 +236,7 @@ export default async function Home() {
         <Reveal>
           <div className="text-center max-w-2xl mx-auto mb-12">
             <h2 className="text-3xl lg:text-4xl font-bold tracking-tight">One platform, every superpower</h2>
-            <p className="mt-3 text-slate-600">Accessibility, WCAG &amp; technical-SEO audits, and analytics that work together.</p>
+            <p className="mt-3 text-slate-600">Accessibility, WCAG &amp; technical-SEO audits, real-user analytics, and global internet performance monitoring — working together.</p>
           </div>
         </Reveal>
 
@@ -325,12 +325,35 @@ export default async function Home() {
             </div>
           </Reveal>
 
-          {/* Monitoring */}
-          <Reveal className="md:col-span-2" delay={120}>
+          {/* Internet Performance Monitoring — large, highlighted */}
+          <Reveal className="md:col-span-4" delay={120}>
+            <div className="h-full rounded-3xl border border-slate-200 p-7 bg-gradient-to-br from-white to-emerald-50/60 hover:shadow-xl hover:-translate-y-0.5 transition-all">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-11 h-11 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-2xl">🌐</div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-semibold">Internet performance monitoring</h3>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">New</span>
+                </div>
+              </div>
+              <p className="text-sm text-slate-600 max-w-lg">
+                Catchpoint-style synthetic monitoring from global agents — uptime plus a full
+                <span className="font-medium"> DNS · TCP · TLS · TTFB · download</span> breakdown, ISP &amp; ASN analytics,
+                country comparisons, SSL-expiry tracking, incident alerts and on-demand traceroute diagnostics.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                {['Uptime', 'ISP / ASN', 'DNS · TCP · TLS · TTFB', 'Incidents', 'Traceroute', 'World map'].map(t => (
+                  <span key={t} className="text-[11px] font-medium text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-lg shadow-sm">{t}</span>
+                ))}
+              </div>
+            </div>
+          </Reveal>
+
+          {/* Uptime glance */}
+          <Reveal className="md:col-span-2" delay={160}>
             <div className="h-full rounded-3xl border border-slate-200 p-7 hover:shadow-xl hover:-translate-y-0.5 transition-all">
               <div className="w-12 h-12 shrink-0 rounded-xl bg-emerald-50 flex items-center justify-center text-2xl mb-4">✓</div>
-              <h3 className="text-lg font-semibold">Uptime & health monitoring</h3>
-              <p className="mt-1 text-sm text-slate-600">Track response latency and availability across every site you run.</p>
+              <h3 className="text-lg font-semibold">Uptime &amp; alerts</h3>
+              <p className="mt-1 text-sm text-slate-600">Know the moment a site goes down — with an evidence-based root-cause hypothesis and email/webhook alerts.</p>
             </div>
           </Reveal>
         </div>
@@ -342,7 +365,7 @@ export default async function Home() {
           <Reveal>
             <div className="text-center max-w-2xl mx-auto mb-12">
               <h2 className="text-3xl lg:text-4xl font-bold tracking-tight">Simple, transparent pricing</h2>
-              <p className="mt-3 text-slate-600">Pay monthly or yearly. Every plan includes the accessibility widget — upgrade for audits, SEO and monitoring.</p>
+              <p className="mt-3 text-slate-600">Pay monthly or yearly. Every plan includes the accessibility widget — upgrade for audits, SEO, and global internet performance monitoring.</p>
             </div>
           </Reveal>
           <div className={`grid gap-5 ${plans.length >= 3 ? 'md:grid-cols-3' : plans.length === 2 ? 'md:grid-cols-2 max-w-3xl mx-auto' : 'max-w-md mx-auto'}`}>
