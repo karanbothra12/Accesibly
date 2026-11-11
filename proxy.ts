@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { unsealData } from 'iron-session'
 import { SessionData, SESSION_OPTIONS } from '@/lib/session'
 
-const PUBLIC_PATHS = ['/login', '/register', '/p/', '/api/auth/login', '/api/auth/register', '/api/ping', '/widget.min.js', '/rum.min.js', '/api/rum', '/api/widget-event']
+const PUBLIC_PATHS = ['/login', '/register', '/p/', '/api/auth/login', '/api/auth/register', '/api/ping', '/widget.min.js', '/rum.min.js', '/world-equirectangular.jpg', '/api/rum', '/api/widget-event']
 const ADMIN_PATHS = ['/admin']
 
 export async function proxy(request: NextRequest) {
