@@ -136,21 +136,28 @@ async function discoverCentralIp(agentId: number): Promise<void> {
 
 // Persist a synthetic measurement + update rollup counters. countryCode/isp/asn are
 // the AGENT's network dimensions (enriched in Phase 2); null is fine for now.
+export type OriginTiming = { totalMs: number | null; ttfbMs: number | null; available: boolean } | null
+
 export async function saveSyntheticResult(
   websiteId: number,
   agentId: number,
   jobId: string | number | null,
   r: SyntheticResult,
-  dims: { countryCode?: string | null; isp?: string | null; asn?: number | null } = {}
+  dims: { countryCode?: string | null; isp?: string | null; asn?: number | null } = {},
+  origin: OriginTiming = null
 ): Promise<void> {
   await query(
     `INSERT INTO synthetic_results
       (website_id, agent_id, job_id, country_code, isp, asn, available, status_code, error_type, error_detail,
-       dns_ms, tcp_ms, tls_ms, ttfb_ms, download_ms, total_ms, redirect_ms, response_size, resolved_ip, ssl_expiry)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+       dns_ms, tcp_ms, tls_ms, ttfb_ms, download_ms, total_ms, redirect_ms, response_size, resolved_ip, ssl_expiry,
+       cdn_vendor, cache_status, edge_pop, response_headers, origin_total_ms, origin_ttfb_ms, origin_available)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+             $21,$22,$23,$24,$25,$26,$27)`,
     [websiteId, agentId, jobId ?? null, dims.countryCode ?? null, dims.isp ?? null, dims.asn ?? null,
      r.available, r.statusCode, r.errorType, r.errorDetail,
-     r.dnsMs, r.tcpMs, r.tlsMs, r.ttfbMs, r.downloadMs, r.totalMs, r.redirectMs, r.responseSize, r.resolvedIp, r.sslExpiry]
+     r.dnsMs, r.tcpMs, r.tlsMs, r.ttfbMs, r.downloadMs, r.totalMs, r.redirectMs, r.responseSize, r.resolvedIp, r.sslExpiry,
+     r.cdnVendor, r.cacheStatus, r.edgePop, r.responseHeaders ? JSON.stringify(r.responseHeaders) : null,
+     origin?.totalMs ?? null, origin?.ttfbMs ?? null, origin?.available ?? null]
   )
   await query(
     `UPDATE monitoring_agents

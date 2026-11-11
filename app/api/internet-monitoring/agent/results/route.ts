@@ -3,15 +3,27 @@ import { queryOne } from '@/lib/db'
 import { authenticateAgent, saveSyntheticResult } from '@/lib/monitoring/agents'
 import { completeMonitoringJob } from '@/lib/monitoring/queue'
 import type { SyntheticResult, SyntheticErrorType } from '@/lib/monitoring/synthetic'
+import type { CacheStatus } from '@/lib/monitoring/cdn'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+const str = (v: unknown, max: number): string | null => (typeof v === 'string' && v ? v.slice(0, max) : null)
 const ERR_TYPES: SyntheticErrorType[] = ['dns', 'tcp', 'tls', 'ssl', 'http', 'timeout', 'ssrf']
+const CACHE_STATES: CacheStatus[] = ['hit', 'miss', 'dynamic', 'bypass', 'stale', 'expired']
 
 function coerce(r: Record<string, unknown>): SyntheticResult {
   const et = r.errorType
+  const cs = r.cacheStatus
+  // Keep only short, string-valued headers (defensive: agents are semi-trusted).
+  let headers: Record<string, string> | null = null
+  if (r.responseHeaders && typeof r.responseHeaders === 'object') {
+    headers = {}
+    for (const [k, v] of Object.entries(r.responseHeaders as Record<string, unknown>).slice(0, 60)) {
+      if (typeof v === 'string') headers[k.toLowerCase().slice(0, 80)] = v.slice(0, 1024)
+    }
+  }
   return {
     available: r.available === true,
     statusCode: num(r.statusCode),
@@ -21,7 +33,18 @@ function coerce(r: Record<string, unknown>): SyntheticResult {
     downloadMs: num(r.downloadMs), totalMs: num(r.totalMs), redirectMs: num(r.redirectMs),
     responseSize: num(r.responseSize), resolvedIp: typeof r.resolvedIp === 'string' ? r.resolvedIp.slice(0, 64) : null,
     sslExpiry: typeof r.sslExpiry === 'string' ? r.sslExpiry.slice(0, 40) : null,
+    cdnVendor: str(r.cdnVendor, 60),
+    cacheStatus: CACHE_STATES.includes(cs as CacheStatus) ? (cs as CacheStatus) : null,
+    edgePop: str(r.edgePop, 80),
+    responseHeaders: headers,
   }
+}
+
+type OriginBody = { totalMs?: unknown; ttfbMs?: unknown; available?: unknown }
+function coerceOrigin(o: unknown): { totalMs: number | null; ttfbMs: number | null; available: boolean } | null {
+  if (!o || typeof o !== 'object') return null
+  const b = o as OriginBody
+  return { totalMs: num(b.totalMs), ttfbMs: num(b.ttfbMs), available: b.available === true }
 }
 
 // POST /api/internet-monitoring/agent/results — token-authenticated.
@@ -49,7 +72,8 @@ export async function POST(request: NextRequest) {
     'SELECT country_code, isp, asn FROM monitoring_agents WHERE id = $1', [agent.id]
   )
   await saveSyntheticResult(job.website_id, agent.id, jobId, result,
-    { countryCode: dims?.country_code ?? null, isp: dims?.isp ?? null, asn: dims?.asn ?? null })
+    { countryCode: dims?.country_code ?? null, isp: dims?.isp ?? null, asn: dims?.asn ?? null },
+    coerceOrigin(body.origin))
 
   // A "site down" result is a SUCCESSFUL measurement — the job is complete either
   // way. (The queue's retry/dead-letter path is only for jobs that threw before a

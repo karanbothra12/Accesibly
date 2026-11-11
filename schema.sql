@@ -844,6 +844,20 @@ CREATE INDEX IF NOT EXISTS synthetic_results_agent_time_idx   ON synthetic_resul
 CREATE INDEX IF NOT EXISTS synthetic_results_asn_time_idx     ON synthetic_results(asn, measured_at DESC);
 CREATE INDEX IF NOT EXISTS synthetic_results_country_time_idx ON synthetic_results(country_code, measured_at DESC);
 
+-- ── Phase 6: CDN & edge monitoring (idempotent; adds to the tables above) ──────
+-- Which CDN served the response, whether it was a cache HIT/MISS, which edge PoP,
+-- the raw response headers (for drill-down), and optional direct-to-origin timings
+-- for the edge-vs-origin comparison (populated only when origin_host is set).
+ALTER TABLE monitored_websites ADD COLUMN IF NOT EXISTS origin_host TEXT;  -- true origin behind the CDN (hostname/IP the merchant owns)
+ALTER TABLE synthetic_results ADD COLUMN IF NOT EXISTS cdn_vendor       TEXT;
+ALTER TABLE synthetic_results ADD COLUMN IF NOT EXISTS cache_status     TEXT;    -- 'hit'|'miss'|'dynamic'|'bypass'|'stale'|'expired'
+ALTER TABLE synthetic_results ADD COLUMN IF NOT EXISTS edge_pop         TEXT;    -- e.g. 'BOM (Mumbai)'
+ALTER TABLE synthetic_results ADD COLUMN IF NOT EXISTS response_headers JSONB;
+ALTER TABLE synthetic_results ADD COLUMN IF NOT EXISTS origin_total_ms  REAL;
+ALTER TABLE synthetic_results ADD COLUMN IF NOT EXISTS origin_ttfb_ms   REAL;
+ALTER TABLE synthetic_results ADD COLUMN IF NOT EXISTS origin_available BOOLEAN;
+CREATE INDEX IF NOT EXISTS synthetic_results_cdn_idx ON synthetic_results(website_id, cdn_vendor, measured_at DESC);
+
 -- Feature + limits (data-driven; mirrors the scheduled_monitoring precedent above).
 INSERT INTO features (key, label, description, sort_order) VALUES
   ('internet_monitoring', 'Internet Performance Monitoring', 'Global synthetic uptime + performance monitoring from distributed agents', 11)

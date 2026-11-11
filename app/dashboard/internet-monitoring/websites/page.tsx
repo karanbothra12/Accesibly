@@ -18,7 +18,7 @@ type Website = {
   id: number; name: string; url: string; description: string | null
   frequency_minutes: number; expected_status: number; timeout_ms: number
   enabled: boolean; verified: boolean; verification_token: string; verification_method: string | null
-  agent_ids: number[]; last_checked_at: string | null; created_at: string
+  agent_ids: number[]; last_checked_at: string | null; created_at: string; origin_host: string | null
 }
 
 export default async function MonitoringWebsitesPage() {
@@ -32,7 +32,7 @@ export default async function MonitoringWebsitesPage() {
 
   const websites = await query<Website>(
     `SELECT id, name, url, description, frequency_minutes, expected_status, timeout_ms,
-            enabled, verified, verification_token, verification_method, agent_ids, last_checked_at, created_at
+            enabled, verified, verification_token, verification_method, agent_ids, last_checked_at, created_at, origin_host
      FROM monitored_websites
      ${superadmin ? '' : 'WHERE merchant_id = $1'}
      ORDER BY created_at DESC`,

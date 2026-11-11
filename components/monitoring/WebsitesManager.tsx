@@ -9,7 +9,7 @@ type Website = {
   id: number; name: string; url: string; description: string | null
   frequency_minutes: number; expected_status: number; timeout_ms: number
   enabled: boolean; verified: boolean; verification_token: string; verification_method: string | null
-  agent_ids: number[]; last_checked_at: string | null; created_at: string
+  agent_ids: number[]; last_checked_at: string | null; created_at: string; origin_host: string | null
 }
 type Ent = { available: boolean; websiteLimit: number; minFrequency: number; frequencies: number[] }
 type ResultRow = {
@@ -17,10 +17,25 @@ type ResultRow = {
   error_type: string | null; error_detail: string | null
   dns_ms: number | null; tcp_ms: number | null; tls_ms: number | null; ttfb_ms: number | null
   download_ms: number | null; total_ms: number | null; response_size: number | null; resolved_ip: string | null
+  cdn_vendor: string | null; cache_status: string | null; edge_pop: string | null
+  origin_total_ms: number | null; origin_ttfb_ms: number | null; origin_available: boolean | null
 }
 type Summary = {
   checks: number; availability: number | null; avgTotal: number | null; p95Total: number | null
   avgDns: number | null; avgTcp: number | null; avgTls: number | null; avgTtfb: number | null
+  cacheHitRate: number | null; avgOriginTtfb: number | null; avgOriginTotal: number | null
+}
+type CdnRow = { vendor: string | null; pop: string | null; count: number }
+
+// Colored pill for a normalized cache status.
+function CachePill({ status }: { status: string | null }) {
+  if (!status) return <span className="text-slate-300">—</span>
+  const map: Record<string, string> = {
+    hit: 'bg-emerald-50 text-emerald-700', miss: 'bg-rose-50 text-rose-700',
+    dynamic: 'bg-slate-100 text-slate-600', bypass: 'bg-amber-50 text-amber-700',
+    stale: 'bg-amber-50 text-amber-700', expired: 'bg-amber-50 text-amber-700', revalidated: 'bg-emerald-50 text-emerald-700',
+  }
+  return <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${map[status] ?? 'bg-slate-100 text-slate-600'}`}>{status}</span>
 }
 
 const ms = (v: number | null | undefined) => (v == null ? '—' : `${Math.round(v)} ms`)
@@ -31,6 +46,7 @@ export default function WebsitesManager({ initial, superadmin = false }: { initi
   const [websites, setWebsites] = useState<Website[]>(initial.websites)
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
+  const [originHost, setOriginHost] = useState('')
   const [freq, setFreq] = useState<number>(initial.frequencies[0] || 5)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -47,11 +63,11 @@ export default function WebsitesManager({ initial, superadmin = false }: { initi
     try {
       const r = await fetch('/api/internet-monitoring/websites', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), url: url.trim(), frequency_minutes: freq }),
+        body: JSON.stringify({ name: name.trim(), url: url.trim(), frequency_minutes: freq, origin_host: originHost.trim() || undefined }),
       })
       const d = await r.json()
       if (!r.ok) { setError(d.message || d.error || 'Failed'); return }
-      setName(''); setUrl(''); await reload()
+      setName(''); setUrl(''); setOriginHost(''); await reload()
     } finally { setBusy(false) }
   }
 
@@ -108,6 +124,11 @@ export default function WebsitesManager({ initial, superadmin = false }: { initi
             className="px-4 py-2 bg-primary hover:bg-primary-dark disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
             {busy ? 'Adding…' : 'Add'}
           </button>
+          <div className="w-full">
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Origin host <span className="normal-case font-normal text-slate-400">— optional, for edge-vs-origin comparison</span></label>
+            <input value={originHost} onChange={e => setOriginHost(e.target.value)} placeholder="origin.example.com (a host that serves the site directly, bypassing the CDN)"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary" />
+          </div>
         </div>
         {atLimit && <p className="px-5 pb-4 text-xs text-amber-600">Plan limit reached ({ent.websiteLimit} website{ent.websiteLimit === 1 ? '' : 's'}).</p>}
         {error && <p className="px-5 pb-4 text-xs text-red-600">{error}</p>}
@@ -220,7 +241,7 @@ function VerifyPanel({ website, superadmin, onVerified }: { website: Website; su
 
 function ResultsPanel({ websiteId }: { websiteId: number }) {
   const [period, setPeriod] = useState('24h')
-  const [data, setData] = useState<{ summary: Summary; results: ResultRow[] } | null>(null)
+  const [data, setData] = useState<{ summary: Summary; results: ResultRow[]; cdn?: CdnRow[] } | null>(null)
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
@@ -264,6 +285,43 @@ function ResultsPanel({ websiteId }: { websiteId: number }) {
             <StatCard label="Avg TLS" value={ms(s.avgTls)} />
             <StatCard label="Avg TTFB" value={ms(s.avgTtfb)} />
           </div>
+          {/* ── CDN & edge (Phase 6) ─────────────────────────────────────── */}
+          {(latest?.cdn_vendor || s.cacheHitRate != null || s.avgOriginTtfb != null) && (
+            <Card className="p-4 space-y-3">
+              <p className="text-xs font-semibold text-slate-500">CDN &amp; edge</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <StatCard label="CDN" value={latest?.cdn_vendor ?? '—'} tint="tint-violet" />
+                <StatCard label="Cache hit rate" value={s.cacheHitRate == null ? '—' : pct(s.cacheHitRate)}
+                  valueClass={(s.cacheHitRate ?? 0) >= 80 ? 'text-emerald-600' : (s.cacheHitRate ?? 101) < 50 ? 'text-rose-600' : 'text-amber-600'} />
+                <StatCard label="Edge PoP (latest)" value={latest?.edge_pop ?? '—'} />
+                <StatCard label="Cache (latest)" value={latest?.cache_status ?? '—'} />
+              </div>
+              {s.avgOriginTtfb != null && (
+                <div className="rounded-lg bg-slate-50 border border-slate-100 p-3">
+                  <p className="text-[11px] font-semibold text-slate-500 mb-2">Edge vs origin (avg TTFB)</p>
+                  <div className="flex items-center gap-4 text-xs">
+                    <span>Edge: <b className="text-slate-800 tabular-nums">{ms(s.avgTtfb)}</b></span>
+                    <span>Origin: <b className="text-slate-800 tabular-nums">{ms(s.avgOriginTtfb)}</b></span>
+                    {s.avgTtfb != null && s.avgOriginTtfb != null && s.avgOriginTtfb > 0 && (
+                      <span className="text-emerald-600 font-medium">
+                        CDN saves ~{Math.max(0, Math.round(s.avgOriginTtfb - s.avgTtfb))}ms
+                        {s.avgOriginTtfb > s.avgTtfb ? ` (${Math.round((1 - s.avgTtfb / s.avgOriginTtfb) * 100)}% faster)` : ''}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {data?.cdn && data.cdn.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {data.cdn.filter(c => c.pop).slice(0, 10).map((c, i) => (
+                    <span key={i} className="px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 text-[10px] font-medium">
+                      {c.pop} · {c.count}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
           {latest && latest.available && (
             <Card className="p-4">
               <p className="text-xs font-semibold text-slate-500 mb-2">Latest check — connection waterfall <span className="font-normal text-slate-400">({new Date(latest.measured_at).toLocaleTimeString()})</span></p>
@@ -279,7 +337,9 @@ function ResultsPanel({ websiteId }: { websiteId: number }) {
                 <tr className="text-left text-slate-400 border-b border-slate-100">
                   <th className="py-2 pr-3 font-medium">When</th><th className="py-2 pr-3 font-medium">Status</th>
                   <th className="py-2 pr-3 font-medium">DNS</th><th className="py-2 pr-3 font-medium">TCP</th><th className="py-2 pr-3 font-medium">TLS</th>
-                  <th className="py-2 pr-3 font-medium">TTFB</th><th className="py-2 pr-3 font-medium">Total</th><th className="py-2 pr-3 font-medium">IP</th>
+                  <th className="py-2 pr-3 font-medium">TTFB</th><th className="py-2 pr-3 font-medium">Total</th>
+                  <th className="py-2 pr-3 font-medium">CDN</th><th className="py-2 pr-3 font-medium">Cache</th><th className="py-2 pr-3 font-medium">PoP</th>
+                  <th className="py-2 pr-3 font-medium">IP</th>
                 </tr>
               </thead>
               <tbody>
@@ -292,6 +352,9 @@ function ResultsPanel({ websiteId }: { websiteId: number }) {
                     <td className="py-2 pr-3 text-slate-600">{ms(r.dns_ms)}</td><td className="py-2 pr-3 text-slate-600">{ms(r.tcp_ms)}</td>
                     <td className="py-2 pr-3 text-slate-600">{ms(r.tls_ms)}</td><td className="py-2 pr-3 text-slate-600">{ms(r.ttfb_ms)}</td>
                     <td className="py-2 pr-3 text-slate-800 font-medium">{ms(r.total_ms)}</td>
+                    <td className="py-2 pr-3 text-slate-600">{r.cdn_vendor ?? '—'}</td>
+                    <td className="py-2 pr-3"><CachePill status={r.cache_status} /></td>
+                    <td className="py-2 pr-3 text-slate-500">{r.edge_pop ?? '—'}</td>
                     <td className="py-2 pr-3 text-slate-400 font-mono">{r.resolved_ip ?? '—'}</td>
                   </tr>
                 ))}

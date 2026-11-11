@@ -35,7 +35,17 @@ type Website = {
   id: number; name: string; url: string; description: string | null
   frequency_minutes: number; expected_status: number; timeout_ms: number
   enabled: boolean; verified: boolean; verification_token: string; verification_method: string | null
-  agent_ids: number[]; last_checked_at: string | null; created_at: string
+  agent_ids: number[]; last_checked_at: string | null; created_at: string; origin_host: string | null
+}
+
+// Normalize + SSRF-validate an optional origin host (hostname or hostname:port).
+async function validateOrigin(raw: unknown): Promise<string | null> {
+  const s = String(raw ?? '').trim()
+  if (!s) return null
+  const host = s.replace(/^https?:\/\//, '').replace(/\/.*$/, '').slice(0, 200)
+  if (!host) return null
+  await assertSafeUrl(`https://${host}`) // throws UnsafeUrlError for private/loopback/etc.
+  return host
 }
 
 // GET /api/internet-monitoring/websites — entitlement + this merchant's websites.
@@ -47,7 +57,7 @@ export async function GET() {
 
   const websites = await query<Website>(
     `SELECT id, name, url, description, frequency_minutes, expected_status, timeout_ms,
-            enabled, verified, verification_token, verification_method, agent_ids, last_checked_at, created_at
+            enabled, verified, verification_token, verification_method, agent_ids, last_checked_at, created_at, origin_host
      FROM monitored_websites
      ${superadmin ? '' : 'WHERE merchant_id = $1'}
      ORDER BY created_at DESC`,
@@ -86,13 +96,18 @@ export async function POST(request: NextRequest) {
   }
 
   const agentIds: number[] = Array.isArray(body.agent_ids) ? body.agent_ids.map(Number).filter(Boolean) : []
+  let originHost: string | null = null
+  try { originHost = await validateOrigin(body.origin_host) } catch (e) {
+    if (e instanceof UnsafeUrlError) return NextResponse.json({ error: `Origin host rejected: ${e.message}` }, { status: 400 })
+    throw e
+  }
   const row = await queryOne<Website>(
-    `INSERT INTO monitored_websites (merchant_id, name, url, description, frequency_minutes, expected_status, timeout_ms, agent_ids)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `INSERT INTO monitored_websites (merchant_id, name, url, description, frequency_minutes, expected_status, timeout_ms, agent_ids, origin_host)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
      RETURNING id, name, url, description, frequency_minutes, expected_status, timeout_ms,
-               enabled, verified, verification_token, verification_method, agent_ids, last_checked_at, created_at`,
+               enabled, verified, verification_token, verification_method, agent_ids, last_checked_at, created_at, origin_host`,
     [session.merchantId, name, url, String(body.description || '').slice(0, 500) || null,
-     frequency, Number(body.expected_status) || 200, Number(body.timeout_ms) || 30000, agentIds]
+     frequency, Number(body.expected_status) || 200, Number(body.timeout_ms) || 30000, agentIds, originHost]
   )
   return NextResponse.json({ website: row }, { status: 201 })
 }
@@ -133,6 +148,12 @@ export async function PATCH(request: NextRequest) {
   if (body.expected_status) set('expected_status', Number(body.expected_status))
   if (body.timeout_ms) set('timeout_ms', Number(body.timeout_ms))
   if (Array.isArray(body.agent_ids)) set('agent_ids', body.agent_ids.map(Number).filter(Boolean))
+  if ('origin_host' in body) {
+    try { set('origin_host', await validateOrigin(body.origin_host)) } catch (e) {
+      if (e instanceof UnsafeUrlError) return NextResponse.json({ error: `Origin host rejected: ${e.message}` }, { status: 400 })
+      throw e
+    }
+  }
   if (sets.length === 0) return NextResponse.json({ error: 'nothing to update' }, { status: 400 })
   vals.push(id)
   await query(`UPDATE monitored_websites SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${vals.length}`, vals)

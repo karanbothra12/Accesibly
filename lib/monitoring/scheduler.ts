@@ -70,7 +70,17 @@ export async function enqueueDueMonitoringChecks(): Promise<number> {
   return created
 }
 
-type JobWebsite = { url: string; expected_status: number; timeout_ms: number }
+type JobWebsite = { url: string; expected_status: number; timeout_ms: number; origin_host: string | null }
+
+// Build a direct-to-origin URL (same protocol + path, but the origin host the
+// merchant configured) so we can time the origin without the CDN in front.
+function originUrlFor(url: string, originHost: string): string | null {
+  try {
+    const u = new URL(url)
+    const o = originHost.includes('://') ? new URL(originHost) : new URL(`${u.protocol}//${originHost}`)
+    return `${o.protocol}//${o.host}${u.pathname}${u.search}`
+  } catch { return null }
+}
 
 // Run queued jobs as the in-process central agent (the worker = agent #1).
 export async function drainCentralMonitoringJobs(agentId: number, max = 50): Promise<number> {
@@ -85,7 +95,7 @@ export async function drainCentralMonitoringJobs(agentId: number, max = 50): Pro
     if (!job) break
     try {
       const w = await queryOne<JobWebsite>(
-        `SELECT url, expected_status, timeout_ms FROM monitored_websites WHERE id = $1`,
+        `SELECT url, expected_status, timeout_ms, origin_host FROM monitored_websites WHERE id = $1`,
         [job.website_id]
       )
       if (!w) { await failMonitoringJob(job.id, agentId, 'website no longer exists'); continue }
@@ -106,8 +116,19 @@ export async function drainCentralMonitoringJobs(agentId: number, max = 50): Pro
       }
 
       const result = await runHttpCheck(w.url, { expectedStatus: w.expected_status, timeoutMs: w.timeout_ms })
+
+      // Edge-vs-origin: if an origin host is configured, time it directly too.
+      let origin = null
+      if (w.origin_host) {
+        const ou = originUrlFor(w.url, w.origin_host)
+        if (ou) {
+          const o = await runHttpCheck(ou, { timeoutMs: w.timeout_ms }).catch(() => null)
+          if (o) origin = { totalMs: o.totalMs, ttfbMs: o.ttfbMs, available: o.available }
+        }
+      }
+
       await saveSyntheticResult(job.website_id, agentId, job.id, result,
-        { countryCode: dims.country_code, isp: dims.isp, asn: dims.asn })
+        { countryCode: dims.country_code, isp: dims.isp, asn: dims.asn }, origin)
       await completeMonitoringJob(job.id, agentId)
       done++
     } catch (e) {

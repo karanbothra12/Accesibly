@@ -4,6 +4,7 @@ import net, { type Socket } from 'node:net'
 import type { TLSSocket } from 'node:tls'
 import { resolveSafeTarget, type SafeTarget } from '@/lib/monitoring/ssrf-exec'
 import { UnsafeUrlError } from '@/lib/ssrf'
+import { analyzeCdn, type CacheStatus } from '@/lib/monitoring/cdn'
 
 // ── Synthetic HTTP check with per-phase timing ────────────────────────────────
 // Pure Node (no browser) active measurement: DNS → TCP → TLS → TTFB → download.
@@ -28,6 +29,11 @@ export type SyntheticResult = {
   responseSize: number | null
   resolvedIp: string | null
   sslExpiry: string | null // ISO timestamp of certificate notAfter
+  // Phase 6 — CDN & edge (derived from the final response's headers)
+  cdnVendor: string | null
+  cacheStatus: CacheStatus
+  edgePop: string | null
+  responseHeaders: Record<string, string> | null
 }
 
 export type CheckOptions = {
@@ -50,6 +56,7 @@ type HopResult = {
   responseSize: number
   redirectLocation: string | null
   sslExpiry: string | null
+  headers: Record<string, string>
 }
 
 // One request to an already-resolved+validated target, connecting to the pinned IP.
@@ -115,6 +122,11 @@ function requestOnce(target: SafeTarget, timeoutMs: number, userAgent: string): 
       ttfbAt = performance.now()
       const status = res.statusCode || 0
       const location = res.headers.location || null
+      // Flatten headers for CDN/cache analysis (array values joined).
+      const headers: Record<string, string> = {}
+      for (const [k, v] of Object.entries(res.headers)) {
+        if (v != null) headers[k] = Array.isArray(v) ? v.join(', ') : String(v)
+      }
       res.on('data', (chunk: Buffer) => {
         size += chunk.length
         if (size > MAX_BODY) { res.destroy() }
@@ -133,6 +145,7 @@ function requestOnce(target: SafeTarget, timeoutMs: number, userAgent: string): 
           responseSize: size,
           redirectLocation: status >= 300 && status < 400 ? (typeof location === 'string' ? location : null) : null,
           sslExpiry,
+          headers,
         })
       })
       res.on('close', () => {
@@ -145,7 +158,7 @@ function requestOnce(target: SafeTarget, timeoutMs: number, userAgent: string): 
           tlsMs: isHttps && tlsAt ? Math.max(0, tlsAt - tcpAt) : null,
           ttfbMs: Math.max(0, ttfbAt - (tlsAt || tcpAt || tStart)),
           downloadMs: Math.max(0, endAt - ttfbAt), hopTotalMs: Math.max(0, endAt - tStart),
-          responseSize: size, redirectLocation: null, sslExpiry,
+          responseSize: size, redirectLocation: null, sslExpiry, headers,
         })
       })
     })
@@ -165,6 +178,7 @@ export async function runHttpCheck(rawUrl: string, opts: CheckOptions = {}): Pro
     available: false, statusCode: null, errorType: null, errorDetail: null,
     dnsMs: null, tcpMs: null, tlsMs: null, ttfbMs: null, downloadMs: null,
     totalMs: null, redirectMs: null, responseSize: null, resolvedIp: null, sslExpiry: null,
+    cdnVendor: null, cacheStatus: null, edgePop: null, responseHeaders: null,
   }
 
   let current = rawUrl
@@ -199,6 +213,7 @@ export async function runHttpCheck(rawUrl: string, opts: CheckOptions = {}): Pro
     // Final hop — build the result from this response.
     const expected = opts.expectedStatus
     const statusOk = expected ? hopRes.statusCode === expected : hopRes.statusCode < 400
+    const cdn = analyzeCdn(hopRes.headers)
     return {
       available: statusOk,
       statusCode: hopRes.statusCode,
@@ -214,6 +229,10 @@ export async function runHttpCheck(rawUrl: string, opts: CheckOptions = {}): Pro
       responseSize: hopRes.responseSize,
       resolvedIp: target.ip,
       sslExpiry: hopRes.sslExpiry,
+      cdnVendor: cdn.vendor,
+      cacheStatus: cdn.cacheStatus,
+      edgePop: cdn.pop ? (cdn.popCity ? `${cdn.pop} (${cdn.popCity})` : cdn.pop) : null,
+      responseHeaders: hopRes.headers,
     }
   }
 
