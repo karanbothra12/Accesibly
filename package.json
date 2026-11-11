@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "worker": "tsx worker/crawl-worker.ts",
+    "monitor:tick": "tsx worker/monitor-tick.ts",
     "agent": "tsx agent/remote-agent.ts"
   },
   "dependencies": {

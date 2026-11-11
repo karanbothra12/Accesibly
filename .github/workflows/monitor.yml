@@ -1,0 +1,34 @@
+name: Internet monitoring tick
+
+# Free, no-card worker: runs a monitoring cycle on a schedule instead of a paid
+# always-on host. GitHub's minimum interval is 5 minutes. Scheduled runs only fire
+# from the default branch, can be delayed under load, and auto-disable after ~60
+# days of repo inactivity (just re-enable in the Actions tab).
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+
+concurrency:
+  group: monitor-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      # --ignore-scripts skips Playwright's browser download (monitoring uses plain
+      # Node HTTP, no Chromium) — keeps the job fast.
+      - run: npm ci --ignore-scripts
+      - run: npx tsx worker/monitor-tick.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          IPINFO_TOKEN: ${{ secrets.IPINFO_TOKEN }}
+          AUDIT_USER_AGENT: 'AccesslyMonitorBot/1.0 (+https://accessly.io/bot)'
+          NODE_ENV: production
