@@ -17,7 +17,7 @@ services:
   - type: worker
     name: accessly-worker
     runtime: docker
-    region: oregon
+    region: singapore                    # co-located with Neon (ap-southeast-1) for low DB latency
     plan: standard                       # crawls are CPU/RAM heavy; size up as needed
     dockerfilePath: ./worker/Dockerfile
     dockerContext: .                     # build from repo root (Dockerfile COPYs the app)
@@ -37,6 +37,8 @@ services:
         value: "15"
       - key: MONITORING_ENABLED        # run Internet-Monitoring checks as central agent #1
         value: "1"
+      - key: IPINFO_TOKEN              # ISP/ASN enrichment (same token as Vercel)
+        sync: false
       - key: VNU_URL                     # internal address of the validator below
         value: "http://accessly-vnu:8888"
       # CSS validation needs a SEPARATE Jigsaw image — leave unset for the pilot
@@ -52,7 +54,7 @@ services:
   - type: pserv
     name: accessly-vnu
     runtime: image
-    region: oregon
+    region: singapore
     plan: starter
     image:
       url: ghcr.io/validator/validator:latest
