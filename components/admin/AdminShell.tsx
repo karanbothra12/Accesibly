@@ -27,6 +27,7 @@ export default function AdminShell({
   const links = [
     { href: '/admin', label: 'Merchants', icon: '👥', active: pathname === '/admin' || pathname.startsWith('/admin/merchants') },
     { href: '/admin/plans', label: 'Plans & Billing', icon: '💳', active: pathname.startsWith('/admin/plans') },
+    { href: '/admin/monitoring', label: 'Internet Monitoring', icon: '🌐', active: pathname.startsWith('/admin/monitoring') },
     { href: '/admin/pages', label: 'Content Pages', icon: '📄', active: pathname.startsWith('/admin/pages') },
     { href: '/admin/errors', label: 'Error Logs', icon: '🐞', active: pathname.startsWith('/admin/errors') },
   ]
