@@ -26,7 +26,7 @@ type Summary = {
 const ms = (v: number | null | undefined) => (v == null ? '—' : `${Math.round(v)} ms`)
 const pct = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(v >= 99.95 ? 0 : 2)}%`)
 
-export default function WebsitesManager({ initial }: { initial: { websites: Website[] } & Ent }) {
+export default function WebsitesManager({ initial, superadmin = false }: { initial: { websites: Website[] } & Ent; superadmin?: boolean }) {
   const [ent, setEnt] = useState<Ent>(initial)
   const [websites, setWebsites] = useState<Website[]>(initial.websites)
   const [name, setName] = useState('')
@@ -118,7 +118,7 @@ export default function WebsitesManager({ initial }: { initial: { websites: Webs
       ) : (
         <div className="space-y-4">
           {websites.map(w => (
-            <WebsiteRow key={w.id} w={w} expanded={expanded === w.id}
+            <WebsiteRow key={w.id} w={w} expanded={expanded === w.id} superadmin={superadmin}
               onToggleExpand={() => setExpanded(expanded === w.id ? null : w.id)}
               onPatch={patch} onRemove={remove} onChanged={reload} />
           ))}
@@ -128,8 +128,8 @@ export default function WebsitesManager({ initial }: { initial: { websites: Webs
   )
 }
 
-function WebsiteRow({ w, expanded, onToggleExpand, onPatch, onRemove, onChanged }: {
-  w: Website; expanded: boolean; onToggleExpand: () => void
+function WebsiteRow({ w, expanded, superadmin, onToggleExpand, onPatch, onRemove, onChanged }: {
+  w: Website; expanded: boolean; superadmin: boolean; onToggleExpand: () => void
   onPatch: (id: number, b: Record<string, unknown>) => Promise<boolean>
   onRemove: (id: number) => void; onChanged: () => void
 }) {
@@ -164,14 +164,14 @@ function WebsiteRow({ w, expanded, onToggleExpand, onPatch, onRemove, onChanged 
       </div>
       {expanded && (
         <div className="border-t border-slate-100 p-5">
-          {w.verified ? <ResultsPanel websiteId={w.id} /> : <VerifyPanel website={w} onVerified={onChanged} />}
+          {w.verified ? <ResultsPanel websiteId={w.id} /> : <VerifyPanel website={w} superadmin={superadmin} onVerified={onChanged} />}
         </div>
       )}
     </Card>
   )
 }
 
-function VerifyPanel({ website, onVerified }: { website: Website; onVerified: () => void }) {
+function VerifyPanel({ website, superadmin, onVerified }: { website: Website; superadmin: boolean; onVerified: () => void }) {
   const [info, setInfo] = useState<{ host: string | null; dns: { name: string | null; value: string }; meta: { tag: string } } | null>(null)
   const [checking, setChecking] = useState(false)
   const [msg, setMsg] = useState('')
@@ -180,7 +180,7 @@ function VerifyPanel({ website, onVerified }: { website: Website; onVerified: ()
     fetch(`/api/internet-monitoring/websites/${website.id}/verify`).then(r => r.json()).then(setInfo).catch(() => {})
   }, [website.id])
 
-  async function verify(method: 'dns-txt' | 'meta') {
+  async function verify(method: 'dns-txt' | 'meta' | 'admin') {
     setChecking(true); setMsg('')
     try {
       const r = await fetch(`/api/internet-monitoring/websites/${website.id}/verify`, {
@@ -194,6 +194,12 @@ function VerifyPanel({ website, onVerified }: { website: Website; onVerified: ()
   if (!info) return <p className="text-sm text-slate-400">Loading verification steps…</p>
   return (
     <div className="space-y-4 text-sm">
+      {superadmin && (
+        <div className="rounded-xl border border-primary/30 bg-primary-lt/40 p-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-slate-700">Admin shortcut — skip DNS/meta and start monitoring now (no head tag or TXT record needed).</p>
+          <button onClick={() => verify('admin')} disabled={checking} className="shrink-0 text-xs px-3 py-1.5 rounded-lg bg-primary text-white hover:bg-primary-dark disabled:opacity-50 font-medium">{checking ? 'Verifying…' : 'Mark verified (I own this)'}</button>
+        </div>
+      )}
       <p className="text-slate-600">Verify you control <span className="font-semibold">{info.host}</span> before monitoring begins. Use either method:</p>
       <div className="rounded-xl border border-slate-200 p-4">
         <p className="font-semibold text-slate-800 mb-1">Option A — DNS TXT record</p>

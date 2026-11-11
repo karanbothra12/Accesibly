@@ -50,6 +50,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (site.verified) return NextResponse.json({ verified: true })
 
   const body = await request.json().catch(() => ({}))
+
+  // SuperAdmin override: the platform operator owns the domains, so they can skip
+  // the DNS/meta challenge entirely (no head tag or TXT record needed).
+  if (body.method === 'admin') {
+    if (!superadmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    await query(
+      `UPDATE monitored_websites SET verified = TRUE, verification_method = 'admin', verified_at = NOW(), updated_at = NOW() WHERE id = $1`,
+      [id]
+    )
+    return NextResponse.json({ verified: true, method: 'admin' })
+  }
+
   const method = body.method === 'meta' ? 'meta' : 'dns-txt'
   const ok = await verifyOwnership(site.url, site.verification_token, method)
   if (!ok) {

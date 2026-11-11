@@ -114,9 +114,13 @@ export async function PATCH(request: NextRequest) {
   const site = await ownWebsite(id, session.merchantId, superadmin)
   if (!site) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // Enabling requires a verified domain.
+  // Enabling requires a verified domain — EXCEPT for SuperAdmin, who owns the
+  // platform/domains and can enable directly (auto-marking it verified).
   if (body.enabled === true && !site.verified) {
-    return NextResponse.json({ code: 'NOT_VERIFIED', message: 'Verify domain ownership before enabling monitoring.' }, { status: 403 })
+    if (!superadmin) {
+      return NextResponse.json({ code: 'NOT_VERIFIED', message: 'Verify domain ownership before enabling monitoring.' }, { status: 403 })
+    }
+    await query(`UPDATE monitored_websites SET verified = TRUE, verification_method = 'admin', verified_at = NOW() WHERE id = $1`, [id])
   }
 
   const sets: string[] = []

@@ -42,7 +42,7 @@ export default async function MonitoringWebsitesPage() {
   return (
     <div className="p-8 max-w-5xl mx-auto">
       <PageHeader icon="⊡" title="Website Monitoring" subtitle="Register sites, verify ownership, and track uptime + response-time breakdown." />
-      <WebsitesManager initial={{ websites, available, websiteLimit, minFrequency, frequencies }} />
+      <WebsitesManager initial={{ websites, available, websiteLimit, minFrequency, frequencies }} superadmin={superadmin} />
     </div>
   )
 }
