@@ -38,12 +38,9 @@ export async function launchBrowser(): Promise<Browser> {
       `--js-flags=--max-old-space-size=${heapMb}`,
       '--disk-cache-size=1',
       '--disable-background-networking',
-      // Cut Chromium's *process/layout* memory so heavy pages render instead of
-      // OOM-crashing on load (page.goto: Page crashed). Site isolation spawns a
-      // renderer per origin — costly on pages full of tracking iframes — so disable
-      // it and cap renderers to one; a crawler doesn't need cross-site protection.
-      '--disable-features=site-per-process,IsolateOrigins,TranslateUI',
-      '--renderer-process-limit=1',
+      // Lightweight, safe trims only. (Do NOT force a single renderer / disable site
+      // isolation here — on a constrained container that concentrates all DOM+iframe
+      // memory into one process and makes heavy pages crash MORE, not less.)
       '--disable-extensions',
       '--mute-audio',
       '--no-first-run',
