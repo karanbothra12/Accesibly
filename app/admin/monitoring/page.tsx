@@ -5,10 +5,7 @@ import { SessionData, SESSION_OPTIONS } from '@/lib/session'
 import { query, queryOne } from '@/lib/db'
 import AdminShell from '@/components/admin/AdminShell'
 import { PageHeader, StatCard } from '@/components/dashboard/ui'
-import AgentsView from '@/components/monitoring/AgentsView'
-import WebsitesManager from '@/components/monitoring/WebsitesManager'
-
-const FREQUENCIES = [1, 5, 10, 15, 30]
+import AdminMonitoringTabs from '@/components/monitoring/AdminMonitoringTabs'
 
 type Website = {
   id: number; name: string; url: string; description: string | null
@@ -43,9 +40,12 @@ export default async function AdminMonitoringPage() {
   const checks = Number(perf?.checks || 0)
   const avail = checks ? `${((Number(perf?.up || 0) / checks) * 100).toFixed(checks && Number(perf?.up) === checks ? 0 : 1)}%` : '—'
 
+  // Site list (all merchants) for the analytics/incidents/diagnostics/reports filters.
+  const sites = websites.map(w => ({ id: w.id, name: w.name, url: w.url }))
+
   return (
     <AdminShell fullName={session.fullName ?? ''} email={session.email ?? ''}>
-      <PageHeader icon="🌐" title="Internet Performance Monitoring" subtitle="Platform-wide synthetic monitoring — all merchants' sites, the agent fleet, and ISP/latency analytics." />
+      <PageHeader icon="🌐" title="Internet Performance Monitoring" subtitle="Platform-wide synthetic monitoring — all merchants' sites, the agent fleet, ISP/Country/ASN analytics, incidents, diagnostics and reports." />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Monitored sites" value={counts?.total ?? '0'} sub={`${counts?.enabled ?? 0} active`} icon="⊡" tint="tint-indigo" />
@@ -54,23 +54,7 @@ export default async function AdminMonitoringPage() {
         <StatCard label="Agents online" value={`${agents?.online ?? 0}/${agents?.total ?? 0}`} icon="📡" />
       </div>
 
-      <div className="space-y-8">
-        <section>
-          <h2 className="text-sm font-semibold text-slate-900 mb-3">Agent fleet</h2>
-          <AgentsView isSuperadmin />
-        </section>
-        <section>
-          <h2 className="text-sm font-semibold text-slate-900 mb-3">Monitored websites</h2>
-          <WebsitesManager
-            initial={{ websites, available: true, websiteLimit: -1, minFrequency: 1, frequencies: FREQUENCIES }}
-            superadmin
-          />
-        </section>
-        <p className="text-xs text-slate-400">
-          Analytics (ISP / Country / ASN), incidents and reports are available to merchants in their dashboard;
-          as SuperAdmin you can enable monitoring on any site here with “Mark verified (I own this)”.
-        </p>
-      </div>
+      <AdminMonitoringTabs websites={websites} sites={sites} />
     </AdminShell>
   )
 }
