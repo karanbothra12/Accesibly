@@ -88,7 +88,10 @@ export async function recordHeartbeat(
 
 // Resolve an agent's public IP → ISP/ASN/location and store it on the agent
 // (best-effort; no-op when no IP-intelligence provider is configured).
-export async function enrichAgentNetwork(agentId: number, ip: string): Promise<void> {
+// When force=true (a central agent refreshing after a host move) the IP's country/
+// city overwrite the stored values; otherwise they only fill blanks, so a remote
+// agent keeps the country the admin registered it with.
+export async function enrichAgentNetwork(agentId: number, ip: string, force = false): Promise<void> {
   try {
     const intel = await enrichIp(ip)
     if (!intel) return
@@ -96,13 +99,19 @@ export async function enrichAgentNetwork(agentId: number, ip: string): Promise<v
       `UPDATE monitoring_agents
        SET isp = COALESCE($2, isp), asn = COALESCE($3, asn), asn_org = COALESCE($4, asn_org),
            network_type = COALESCE($5, network_type),
-           country_code = COALESCE(country_code, $6), city = COALESCE(city, $7),
+           country_code = ${force ? 'COALESCE($6, country_code)' : 'COALESCE(country_code, $6)'},
+           city = ${force ? 'COALESCE($7, city)' : 'COALESCE(city, $7)'},
            latitude = COALESCE($8, latitude), longitude = COALESCE($9, longitude)
        WHERE id = $1`,
       [agentId, intel.isp, intel.asn, intel.asnOrg, intel.networkType, intel.countryCode, intel.city, intel.latitude, intel.longitude]
     )
   } catch { /* best-effort */ }
 }
+
+// Refresh the central agent's own IP/ISP once per worker process. This way a host
+// move (e.g. GitHub Actions → Railway → a VPS) self-heals the stale location label
+// on the next deploy, without hammering the IP lookup every tick.
+let centralIpRefreshed = false
 
 // Upsert the in-process central agent (the worker runs as "agent #1").
 export async function ensureCentralAgent(name = 'central-worker'): Promise<number> {
@@ -111,7 +120,7 @@ export async function ensureCentralAgent(name = 'central-worker'): Promise<numbe
   )
   if (existing) {
     await query(`UPDATE monitoring_agents SET last_heartbeat_at = NOW(), status = 'active' WHERE id = $1`, [existing.id])
-    if (!existing.public_ip) await discoverCentralIp(existing.id)
+    if (!centralIpRefreshed) { centralIpRefreshed = true; await discoverCentralIp(existing.id, true) }
     return existing.id
   }
   const row = await queryOne<{ id: number }>(
@@ -119,18 +128,20 @@ export async function ensureCentralAgent(name = 'central-worker'): Promise<numbe
      VALUES ($1, 'central', 'active', NOW()) RETURNING id`,
     [name]
   )
-  await discoverCentralIp(row!.id)
+  centralIpRefreshed = true
+  await discoverCentralIp(row!.id, true)
   return row!.id
 }
 
-// The central agent has no inbound heartbeat, so it learns its own public IP once
-// (then enriches ISP/ASN/location so it appears on the map). Best-effort.
-async function discoverCentralIp(agentId: number): Promise<void> {
+// The central agent has no inbound heartbeat, so it learns its own public IP (then
+// enriches ISP/ASN/location so it appears on the map). force=true overwrites a stale
+// IP from a previous host; otherwise it only fills a blank. Best-effort.
+async function discoverCentralIp(agentId: number, force = false): Promise<void> {
   try {
     const ip = (await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(5000) }).then(r => r.text())).trim()
     if (!ip || !/^[\d.]+$|:/.test(ip)) return
-    await query(`UPDATE monitoring_agents SET public_ip = $2 WHERE id = $1 AND public_ip IS NULL`, [agentId, ip])
-    await enrichAgentNetwork(agentId, ip)
+    await query(`UPDATE monitoring_agents SET public_ip = $2 WHERE id = $1${force ? '' : ' AND public_ip IS NULL'}`, [agentId, ip])
+    await enrichAgentNetwork(agentId, ip, force)
   } catch { /* best-effort */ }
 }
 
