@@ -26,15 +26,25 @@ const HEARTBEAT_MS = Number(process.env.AGENT_HEARTBEAT_MS || 30000)
 
 let running = true
 let failed = 0
+let publicIp: string | null = null
 
 function log(...a: unknown[]) { console.log(new Date().toISOString(), '[agent]', ...a) }
 const auth = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
+
+// Learn this agent's own public IP so the server can enrich ISP/ASN/location and
+// plot it on the map. Best-effort; the server also falls back to the request IP.
+async function discoverPublicIp(): Promise<void> {
+  try {
+    const ip = (await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(5000) }).then(r => r.text())).trim()
+    if (ip && /^[\d.]+$|:/.test(ip)) { publicIp = ip; log('public IP', ip) }
+  } catch { /* server will fall back to the request IP */ }
+}
 
 async function heartbeat(): Promise<void> {
   try {
     await fetch(`${API}/api/internet-monitoring/agent/heartbeat`, {
       method: 'POST', headers: auth,
-      body: JSON.stringify({ failed_jobs: failed }),
+      body: JSON.stringify({ failed_jobs: failed, public_ip: publicIp }),
     })
   } catch (e) { log('heartbeat failed', e instanceof Error ? e.message : e) }
 }
@@ -57,6 +67,7 @@ async function pollOnce(): Promise<boolean> {
 async function main(): Promise<void> {
   if (!API || !TOKEN) { log('FATAL: MONITORING_API_URL and AGENT_TOKEN are required'); process.exit(1) }
   log(`started → ${API} (poll ${POLL_MS}ms, heartbeat ${HEARTBEAT_MS}ms)`)
+  await discoverPublicIp()
   await heartbeat()
   const hb = setInterval(heartbeat, HEARTBEAT_MS)
 
