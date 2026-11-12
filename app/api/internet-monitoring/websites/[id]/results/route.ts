@@ -58,12 +58,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   )
 
   const results = await query(
-    `SELECT id, measured_at, available, status_code, error_type, error_detail,
-            dns_ms, tcp_ms, tls_ms, ttfb_ms, download_ms, total_ms, response_size, resolved_ip, ssl_expiry, agent_id,
-            cdn_vendor, cache_status, edge_pop, origin_total_ms, origin_ttfb_ms, origin_available
-     FROM synthetic_results
-     WHERE website_id = $1 AND measured_at >= NOW() - make_interval(hours => $2)
-     ORDER BY measured_at DESC
+    `SELECT sr.id, sr.measured_at, sr.available, sr.status_code, sr.error_type, sr.error_detail,
+            sr.dns_ms, sr.tcp_ms, sr.tls_ms, sr.ttfb_ms, sr.download_ms, sr.total_ms, sr.response_size,
+            sr.resolved_ip, sr.ssl_expiry, sr.agent_id,
+            sr.cdn_vendor, sr.cache_status, sr.edge_pop, sr.origin_total_ms, sr.origin_ttfb_ms, sr.origin_available,
+            a.name AS agent_name, a.kind AS agent_kind,
+            COALESCE(sr.country_code, a.country_code) AS agent_country, a.city AS agent_city
+     FROM synthetic_results sr
+     LEFT JOIN monitoring_agents a ON a.id = sr.agent_id
+     WHERE sr.website_id = $1 AND sr.measured_at >= NOW() - make_interval(hours => $2)
+     ORDER BY sr.measured_at DESC
      LIMIT 500`,
     [id, hours]
   )

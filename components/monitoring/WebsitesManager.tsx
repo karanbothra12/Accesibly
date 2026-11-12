@@ -19,6 +19,8 @@ type ResultRow = {
   download_ms: number | null; total_ms: number | null; response_size: number | null; resolved_ip: string | null
   cdn_vendor: string | null; cache_status: string | null; edge_pop: string | null
   origin_total_ms: number | null; origin_ttfb_ms: number | null; origin_available: boolean | null
+  agent_id: number | null; agent_name: string | null; agent_kind: string | null
+  agent_country: string | null; agent_city: string | null
 }
 type Summary = {
   checks: number; availability: number | null; avgTotal: number | null; p95Total: number | null
@@ -335,7 +337,7 @@ function ResultsPanel({ websiteId }: { websiteId: number }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-slate-400 border-b border-slate-100">
-                  <th className="py-2 pr-3 font-medium">When</th><th className="py-2 pr-3 font-medium">Status</th>
+                  <th className="py-2 pr-3 font-medium">When</th><th className="py-2 pr-3 font-medium">Agent</th><th className="py-2 pr-3 font-medium">Status</th>
                   <th className="py-2 pr-3 font-medium">DNS</th><th className="py-2 pr-3 font-medium">TCP</th><th className="py-2 pr-3 font-medium">TLS</th>
                   <th className="py-2 pr-3 font-medium">TTFB</th><th className="py-2 pr-3 font-medium">Total</th>
                   <th className="py-2 pr-3 font-medium">CDN</th><th className="py-2 pr-3 font-medium">Cache</th><th className="py-2 pr-3 font-medium">PoP</th>
@@ -346,6 +348,14 @@ function ResultsPanel({ websiteId }: { websiteId: number }) {
                 {rows.slice(0, 60).map(r => (
                   <tr key={r.id} className="border-b border-slate-50">
                     <td className="py-2 pr-3 text-slate-500 whitespace-nowrap">{new Date(r.measured_at).toLocaleString()}</td>
+                    <td className="py-2 pr-3 whitespace-nowrap">
+                      {r.agent_name
+                        ? <span title={[r.agent_city, r.agent_country].filter(Boolean).join(', ')}>
+                            <span className="font-medium text-slate-700">{r.agent_name}</span>
+                            {r.agent_country && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{r.agent_country}</span>}
+                          </span>
+                        : <span className="text-slate-300">—</span>}
+                    </td>
                     <td className="py-2 pr-3">{r.available
                       ? <span className="text-emerald-600 font-medium">{r.status_code ?? 'up'}</span>
                       : <span className="text-rose-600 font-medium" title={r.error_detail ?? ''}>{r.error_type ?? 'down'}{r.status_code ? ` ${r.status_code}` : ''}</span>}</td>
