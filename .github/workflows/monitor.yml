@@ -1,13 +1,13 @@
 name: Internet monitoring tick
 
-# Free, no-card worker: runs a monitoring cycle on a schedule instead of a paid
-# always-on host. GitHub's minimum interval is 5 minutes. Scheduled runs only fire
-# from the default branch, can be delayed under load, and auto-disable after ~60
-# days of repo inactivity (just re-enable in the Actions tab).
+# NOTE: the scheduled tick is DISABLED — the monitoring loop now runs continuously
+# on the always-on worker (Railway/Oracle). Two central runners would share agent #1
+# and flap its location label, so the 5-min cron is turned off here. Re-enable the
+# `schedule:` block below only if you drop the always-on worker.
 on:
-  schedule:
-    - cron: '*/5 * * * *'
-  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+  # schedule:
+  #   - cron: '*/5 * * * *'
+  workflow_dispatch: {}   # still runnable manually from the Actions tab if needed
 
 concurrency:
   group: monitor-tick
