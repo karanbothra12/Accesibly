@@ -332,6 +332,10 @@ async function auditPage(page: Page, url: string, tags: string[] | null, collect
     if (collectA11y) {
       const builder = new AxeBuilder({ page })
       if (tags) builder.withTags(tags)
+      // Only compute violations (we don't use passes/incomplete/inapplicable). On a
+      // large DOM this avoids axe building huge node lists in-page — much less memory,
+      // which prevents the renderer OOM ("Target crashed") during frame.evaluate.
+      builder.options({ resultTypes: ['violations'] })
       const axe = await builder.analyze()
       const violations: unknown[] = [...axe.violations]
 
