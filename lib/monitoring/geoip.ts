@@ -124,25 +124,31 @@ const CACHE_TTL_DAYS = 14
 export async function enrichIp(ip: string | null | undefined): Promise<IpIntel | null> {
   if (!ip) return null
   const cached = await queryOne<IpIntel & { enriched_at: string }>(
-    `SELECT asn, asn_org AS "asnOrg", isp, country_code AS "countryCode", city, network_type AS "networkType", source, enriched_at
+    `SELECT asn, asn_org AS "asnOrg", isp, country_code AS "countryCode", city, network_type AS "networkType",
+            source, latitude, longitude, enriched_at
      FROM ip_intelligence WHERE ip = $1 AND enriched_at > NOW() - make_interval(days => $2)`,
     [ip, CACHE_TTL_DAYS]
   )
-  if (cached) return { ...cached, latitude: null, longitude: null }
+  // Full cache hit (coordinates present) — use it.
+  if (cached && cached.latitude != null) return cached
 
   const provider = getProvider()
-  if (!provider) return null
+  // No provider to improve on the cache: return whatever we have (coords may be null).
+  if (!provider) return cached ?? null
+
   let intel: IpIntel | null = null
   try { intel = await provider.lookup(ip) } catch { intel = null }
-  if (!intel) return null
+  // Provider failed — fall back to the cached row if we have one (coords-less older rows included).
+  if (!intel) return cached ?? null
 
   await query(
-    `INSERT INTO ip_intelligence (ip, asn, asn_org, isp, country_code, city, network_type, source, enriched_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8, NOW())
+    `INSERT INTO ip_intelligence (ip, asn, asn_org, isp, country_code, city, network_type, source, latitude, longitude, enriched_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, NOW())
      ON CONFLICT (ip) DO UPDATE SET asn=EXCLUDED.asn, asn_org=EXCLUDED.asn_org, isp=EXCLUDED.isp,
        country_code=EXCLUDED.country_code, city=EXCLUDED.city, network_type=EXCLUDED.network_type,
-       source=EXCLUDED.source, enriched_at=NOW()`,
-    [ip, intel.asn, intel.asnOrg, intel.isp, intel.countryCode, intel.city, intel.networkType, intel.source]
+       source=EXCLUDED.source, latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, enriched_at=NOW()`,
+    [ip, intel.asn, intel.asnOrg, intel.isp, intel.countryCode, intel.city, intel.networkType, intel.source,
+     intel.latitude, intel.longitude]
   )
   return intel
 }

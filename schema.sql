@@ -899,8 +899,13 @@ CREATE TABLE IF NOT EXISTS ip_intelligence (
   city         TEXT,
   network_type TEXT,                 -- 'datacenter' | 'residential' | 'mobile' | 'unknown'
   source       TEXT,                 -- 'maxmind' | 'ipinfo' | 'none'
+  latitude     REAL,
+  longitude    REAL,
   enriched_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Coordinates cached alongside the rest so cache hits can still plot on the map.
+ALTER TABLE ip_intelligence ADD COLUMN IF NOT EXISTS latitude REAL;
+ALTER TABLE ip_intelligence ADD COLUMN IF NOT EXISTS longitude REAL;
 -- Agents gain an approximate location for the world map (Phase 5), filled on enrich.
 ALTER TABLE monitoring_agents ADD COLUMN IF NOT EXISTS latitude REAL;
 ALTER TABLE monitoring_agents ADD COLUMN IF NOT EXISTS longitude REAL;
