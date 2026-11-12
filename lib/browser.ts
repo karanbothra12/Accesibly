@@ -18,10 +18,15 @@ export async function launchBrowser(): Promise<Browser> {
   }
 
   // Local dev + the Docker worker: full Playwright ships its own Chromium.
-  // The args keep Chromium alive inside containers: --disable-dev-shm-usage makes
-  // it use /tmp instead of the container's tiny (64 MB) /dev/shm, which is the usual
-  // cause of a "Page crashed" (renderer OOM) on heavy pages; --no-sandbox is required
-  // when the container runs as root (e.g. Railway).
+  // The args keep Chromium alive inside containers:
+  //  - --disable-dev-shm-usage: use /tmp instead of the tiny (64 MB) /dev/shm.
+  //  - --no-sandbox: required when the container runs as root (e.g. Railway).
+  //  - --js-flags=--max-old-space-size: CAP the renderer's V8 heap so that under
+  //    memory pressure Chromium garbage-collects (slower) instead of growing until
+  //    the container OOM-kills it ("Page crashed" / "Target crashed"). Tune via
+  //    CHROMIUM_MAX_HEAP_MB to fit the host's RAM — smaller = safer but slower.
+  //  - --disk-cache-size: keep the in-memory/disk cache tiny.
+  const heapMb = Number(process.env.CHROMIUM_MAX_HEAP_MB) || 512
   const { chromium } = await import('playwright')
   return (await chromium.launch({
     headless: true,
@@ -30,6 +35,9 @@ export async function launchBrowser(): Promise<Browser> {
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-gpu',
+      `--js-flags=--max-old-space-size=${heapMb}`,
+      '--disk-cache-size=1',
+      '--disable-background-networking',
     ],
   })) as unknown as Browser
 }
