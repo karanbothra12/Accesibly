@@ -493,8 +493,16 @@ export async function runCrawl(
 
     // SSRF defense-in-depth: block navigations (incl. redirects) to private/
     // internal addresses. Only document requests are DNS-checked to stay fast.
+    // Also skip heavy byte downloads (images/media/fonts): the audit needs the DOM
+    // + CSS, not the pixels, so dropping them keeps Chromium's memory low and
+    // prevents renderer OOM ("Page crashed") on image-heavy pages. The <img> elements
+    // (with their alt text) still exist in the DOM, so accessibility checks are intact.
     await context.route('**/*', async route => {
-      if (route.request().resourceType() === 'document') {
+      const type = route.request().resourceType()
+      if (type === 'image' || type === 'media' || type === 'font') {
+        return route.abort()
+      }
+      if (type === 'document') {
         try { await assertSafeUrl(route.request().url()) }
         catch { return route.abort('blockedbyclient') }
       }
