@@ -1,0 +1,57 @@
+# ── Accessly background brain — run on ONE always-on host ─────────────────────
+# (e.g. an Oracle Cloud "Always Free" Ampere/Arm VM: shape VM.Standard.A1.Flex).
+# This one stack runs the WHOLE app's background work:
+#   • accessibility-audit crawler (drains crawl_jobs)
+#   • scheduled re-audits
+#   • Internet Performance Monitoring tick (central agent #1)  [MONITORING_ENABLED]
+#   • email/alert delivery
+# plus the W3C HTML validator the audits call.
+#
+# One-command deploy:
+#   cp .env.worker.example .env   # then fill in real secrets
+#   docker compose up -d --build
+# The web app itself stays on Vercel; set CRAWL_WORKER_ENABLED=1 there so audits
+# are queued to this worker. See docs/deploy-oracle.md for the full runbook.
+
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    restart: always
+    env_file: .env
+    environment:
+      MONITORING_ENABLED: "1"            # run the Internet-Monitoring tick here
+      CRAWL_WORKER_ENABLED: "1"          # drain queued audit crawls
+      VNU_URL: "http://vnu:8888"         # HTML validator (service below)
+      WORKER_POLL_MS: "5000"
+      WORKER_STALL_MINUTES: "15"
+      AUDIT_USER_AGENT: "AccesslyAuditBot/1.0 (+https://accessly.io/bot)"
+      # CSS_VALIDATOR_URL: "http://css:8888/css-validator/validator"  # see note below
+    depends_on:
+      - vnu
+    logging:                              # keep disk bounded on a small free VM
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # W3C Nu HTML Checker — the audit crawler calls this (VNU_URL) for HTML validation.
+  vnu:
+    image: ghcr.io/validator/validator:latest
+    restart: always
+    # The image is Java/multi-arch and should run natively on Arm. If your VM
+    # cannot pull/run it on Arm, uncomment the next line to run it via emulation:
+    # platform: linux/amd64
+    expose:
+      - "8888"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # Optional — W3C CSS (Jigsaw) validator. The public image is typically amd64-only
+  # (needs emulation on Arm), and CSS checks degrade gracefully without it. To enable:
+  # 1) uncomment this service, 2) uncomment CSS_VALIDATOR_URL on the worker above.
+  # css:
+  #   image: ghcr.io/w3c/css-validator:latest   # verify an image/tag you trust
+  #   restart: always
+  #   platform: linux/amd64
+  #   expose: ["8888"]

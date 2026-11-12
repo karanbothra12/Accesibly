@@ -1,0 +1,20 @@
+# ── Remote monitoring agent (extra vantage point) ─────────────────────────────
+# Run this on an ADDITIONAL host in another region/network to measure from there.
+# Lightweight (no browser) — fits even a tiny free VM (e.g. Oracle E2.1.Micro).
+# It only polls the central API and reports back; it never touches the database.
+#
+# Deploy:
+#   AGENT_TOKEN and MONITORING_API_URL must be set (see .env.agent.example).
+#   cp .env.agent.example .env.agent   # fill in the token for THIS agent
+#   docker compose -f docker-compose.agent.yml up -d --build
+
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    restart: always
+    env_file: .env.agent
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

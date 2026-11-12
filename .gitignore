@@ -7,10 +7,11 @@ node_modules/
 .next/
 out/
 
-# env — NEVER commit these
+# env — NEVER commit these (the *.example templates ARE committed)
 .env.local
 .env.*.local
 .env
+.env.agent
 
 # debug
 npm-debug.log*
