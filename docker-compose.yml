@@ -19,6 +19,7 @@ services:
       context: .
       dockerfile: worker/Dockerfile
     restart: always
+    shm_size: "1gb"                      # give Chromium real shared memory (avoids "Page crashed")
     env_file: .env
     environment:
       MONITORING_ENABLED: "1"            # run the Internet-Monitoring tick here

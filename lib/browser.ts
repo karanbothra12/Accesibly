@@ -17,7 +17,19 @@ export async function launchBrowser(): Promise<Browser> {
     })
   }
 
-  // Local development: full Playwright ships its own Chromium.
+  // Local dev + the Docker worker: full Playwright ships its own Chromium.
+  // The args keep Chromium alive inside containers: --disable-dev-shm-usage makes
+  // it use /tmp instead of the container's tiny (64 MB) /dev/shm, which is the usual
+  // cause of a "Page crashed" (renderer OOM) on heavy pages; --no-sandbox is required
+  // when the container runs as root (e.g. Railway).
   const { chromium } = await import('playwright')
-  return (await chromium.launch({ headless: true })) as unknown as Browser
+  return (await chromium.launch({
+    headless: true,
+    args: [
+      '--disable-dev-shm-usage',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-gpu',
+    ],
+  })) as unknown as Browser
 }
