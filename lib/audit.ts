@@ -513,8 +513,6 @@ export async function runCrawl(
       return route.continue()
     })
 
-    const page = await context.newPage()
-
     const start = normalize(startUrl)
     const queue: string[] = [start]
     const seen = new Set<string>([start])
@@ -525,7 +523,16 @@ export async function runCrawl(
         break
       }
       const url = queue.shift()!
-      const result = await auditPage(page, url, tags, collectSeo, collectA11y, collectHtml, collectCss, collectLinks, siteOrigin, linkCache)
+      // Fresh page per URL, closed afterwards, so Chromium's renderer memory doesn't
+      // accumulate across the crawl — each (possibly heavy) page gets the full memory
+      // budget, which stops the cumulative OOM crashes on later pages.
+      const page = await context.newPage()
+      let result: PageAuditResult
+      try {
+        result = await auditPage(page, url, tags, collectSeo, collectA11y, collectHtml, collectCss, collectLinks, siteOrigin, linkCache)
+      } finally {
+        await page.close().catch(() => {})
+      }
       pagesCrawled++
       totalIssues += result.violations
       if (result.seo) {
