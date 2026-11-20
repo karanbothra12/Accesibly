@@ -58,9 +58,20 @@ describe('hasLabelInNameMismatch (F96 / WCAG 2.5.3)', () => {
     expect(hasLabelInNameMismatch('', 'Close dialog')).toBe(false)
     expect(hasLabelInNameMismatch('Close', '')).toBe(false)
   })
-  it('skips icon/number-only visible text (no letters)', () => {
+  it('skips purely symbolic / emoji labels (normalize to empty)', () => {
     expect(hasLabelInNameMismatch('★', 'Rate five stars')).toBe(false)
-    expect(hasLabelInNameMismatch('123', 'Page one')).toBe(false)
+    expect(hasLabelInNameMismatch('🔍', 'Search')).toBe(false)
+  })
+  it('flags numeric / price visible labels not in the name (PowerMapper parity)', () => {
+    // Real angara.com/c/rings case: visible price, aria-label is the product name.
+    expect(hasLabelInNameMismatch(
+      '$1,059 - $10,000+',
+      'Lab-Grown Prong-Set Round Diamond Inside Out Hinged Clip Hoop Earrings',
+    )).toBe(true)
+    expect(hasLabelInNameMismatch('123', 'Go to page')).toBe(true)
+  })
+  it('passes when the number is contained in the name', () => {
+    expect(hasLabelInNameMismatch('123', 'Page 123')).toBe(false)
   })
 })
 

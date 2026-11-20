@@ -49,9 +49,12 @@ function normalizeLabel(s: string): string {
 export function hasLabelInNameMismatch(visibleText: string, accessibleName: string): boolean {
   const v = normalizeLabel(visibleText)
   const a = normalizeLabel(accessibleName)
-  if (!v || !a) return false          // need both a visible label and an accessible name
-  if (!/\p{L}/u.test(v)) return false // visible label must contain letters (skip icon/number-only)
-  return !a.includes(v)               // F96: visible label not contained in the accessible name
+  // Need both a visible label and an accessible name. normalizeLabel strips symbols/
+  // emoji, so a purely iconographic label (e.g. "★", "🔍") normalizes to "" and is
+  // skipped here — but a NUMERIC label like a price ("$1,059 - $10,000+") is kept and
+  // checked, matching PowerMapper (a price on a product link IS a visible label).
+  if (!v || !a) return false
+  return !a.includes(v) // F96: visible label not contained in the accessible name
 }
 
 // WCAG 1.3.5 Identify Input Purpose (Level AA): fields collecting information ABOUT
