@@ -6,7 +6,7 @@ import { validateHtml, type HtmlResult } from '@/lib/html-validate'
 import { validateCss, type CssResult } from '@/lib/css-validate'
 import { checkPageLinks, type LinkCheckResult, type LinkStatus } from '@/lib/linkcheck'
 import { detectForeignLanguage } from '@/lib/langdetect'
-import { hasNewWindowWarning, findDuplicateIds, hasLabelInNameMismatch } from '@/lib/failure-techniques'
+import { hasNewWindowWarning, findDuplicateIds, hasLabelInNameMismatch, inputPurposeIssue } from '@/lib/failure-techniques'
 import { assertSafeUrl } from '@/lib/ssrf'
 
 // ── Accessibility audit engine ────────────────────────────────
@@ -240,6 +240,7 @@ export async function detectFailureTechniques(page: Page): Promise<{
   blankLinks: Array<{ html: string; target: string }>
   dupIds: Array<{ html: string; target: string; id: string; count: number }>
   labelMismatches: Array<{ html: string; target: string; visibleText: string; accessibleName: string }>
+  inputPurpose: Array<{ html: string; target: string; expected: string }>
 }> {
   const raw = await page.evaluate(() => {
     // F22 candidates: every link opening a new window, with its accessible text.
@@ -308,7 +309,34 @@ export async function detectFailureTechniques(page: Page): Promise<{
       if (labelCtrls.length >= 150) break
     }
 
-    return { blank, ids, labelCtrls }
+    // WCAG 1.3.5 candidates: text-entry fields, with the hint text Node uses to infer
+    // whether they collect user info, plus their current autocomplete value.
+    const inputs: Array<{ html: string; target: string; autocomplete: string; hint: string }> = []
+    const SKIP_TYPES = ['hidden', 'checkbox', 'radio', 'submit', 'button', 'image', 'file', 'range', 'color', 'reset']
+    for (const el of Array.from(document.querySelectorAll('input, textarea, select'))) {
+      const tag = el.tagName.toLowerCase()
+      const type = (el.getAttribute('type') || 'text').toLowerCase()
+      if (tag === 'input' && SKIP_TYPES.includes(type)) continue
+      if (el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('disabled')) continue
+      const name = el.getAttribute('name') || ''
+      const idAttr = el.id || ''
+      let labelText = ''
+      if (idAttr) {
+        const lab = document.querySelector('label[for="' + (window.CSS && CSS.escape ? CSS.escape(idAttr) : idAttr) + '"]')
+        if (lab) labelText = lab.textContent || ''
+      }
+      const wrap = el.closest('label')
+      if (wrap) labelText += ' ' + (wrap.textContent || '')
+      const hint = [name, idAttr, el.getAttribute('placeholder') || '', el.getAttribute('aria-label') || '', labelText].join(' ')
+      let target: string
+      if (idAttr) target = tag + '#' + idAttr
+      else if (name) target = tag + '[name="' + name + '"]'
+      else { const cls = (el.getAttribute('class') || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).join('.'); target = tag + (cls ? '.' + cls : '') }
+      inputs.push({ html: (el.outerHTML || '').slice(0, 200), target, autocomplete: el.getAttribute('autocomplete') || '', hint })
+      if (inputs.length >= 150) break
+    }
+
+    return { blank, ids, labelCtrls, inputs }
   })
 
   const blankLinks: Array<{ html: string; target: string }> = []
@@ -337,7 +365,14 @@ export async function detectFailureTechniques(page: Page): Promise<{
     if (labelMismatches.length >= 25) break
   }
 
-  return { blankLinks, dupIds, labelMismatches }
+  const inputPurpose: Array<{ html: string; target: string; expected: string }> = []
+  for (const f of raw.inputs) {
+    const expected = inputPurposeIssue({ autocomplete: f.autocomplete, hint: f.hint })
+    if (expected) inputPurpose.push({ html: f.html, target: f.target, expected })
+    if (inputPurpose.length >= 25) break
+  }
+
+  return { blankLinks, dupIds, labelMismatches, inputPurpose }
 }
 
 async function auditPage(page: Page, url: string, tags: string[] | null, collectSeo: boolean, collectA11y: boolean, collectHtml: boolean, collectCss: boolean, collectLinks: boolean, siteOrigin: string, linkCache: Map<string, LinkStatus>): Promise<PageAuditResult> {
@@ -453,6 +488,21 @@ async function auditPage(page: Page, url: string, tags: string[] | null, collect
               html: m.html,
               target: [m.target],
               failureSummary: `Visible label “${m.visibleText}” is not contained in the accessible name “${m.accessibleName}” (WCAG 2.5.3, F96).`,
+            })),
+          })
+        }
+        if (ft.inputPurpose.length > 0) {
+          violations.push({
+            id: 'identify-input-purpose',
+            impact: 'moderate',
+            description: 'Fields that collect information about the user should expose their purpose with an HTML autocomplete token, so browsers and assistive tech can autofill and adapt them (WCAG 1.3.5 Identify Input Purpose, Level AA, technique H98).',
+            help: 'Add an autocomplete attribute identifying the input purpose',
+            helpUrl: 'https://www.w3.org/WAI/WCAG21/Understanding/identify-input-purpose.html',
+            tags: ['cat.forms', 'wcag21aa', 'wcag135'],
+            nodes: ft.inputPurpose.map(f => ({
+              html: f.html,
+              target: [f.target],
+              failureSummary: `This field appears to collect user information but has no autocomplete purpose; add autocomplete="${f.expected}" (WCAG 1.3.5, H98).`,
             })),
           })
         }

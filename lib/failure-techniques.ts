@@ -53,3 +53,53 @@ export function hasLabelInNameMismatch(visibleText: string, accessibleName: stri
   if (!/\p{L}/u.test(v)) return false // visible label must contain letters (skip icon/number-only)
   return !a.includes(v)               // F96: visible label not contained in the accessible name
 }
+
+// WCAG 1.3.5 Identify Input Purpose (Level AA): fields collecting information ABOUT
+// THE USER must expose that purpose via an HTML autocomplete token (technique H98).
+// axe only checks autocomplete values that are present (autocomplete-valid); it can't
+// flag a MISSING one. We infer the likely purpose from the field's name/id/label/
+// placeholder and flag user-info fields that don't already carry a valid token.
+
+// The standard HTML autocomplete field-name tokens (subset relevant to user info).
+const VALID_AUTOCOMPLETE = new Set([
+  'name', 'honorific-prefix', 'given-name', 'additional-name', 'family-name', 'honorific-suffix',
+  'nickname', 'username', 'new-password', 'current-password', 'one-time-code', 'email', 'impp', 'url',
+  'organization-title', 'organization', 'street-address', 'address-line1', 'address-line2', 'address-line3',
+  'address-level1', 'address-level2', 'address-level3', 'address-level4', 'country', 'country-name',
+  'postal-code', 'cc-name', 'cc-given-name', 'cc-additional-name', 'cc-family-name', 'cc-number', 'cc-exp',
+  'cc-exp-month', 'cc-exp-year', 'cc-csc', 'cc-type', 'language', 'bday', 'bday-day', 'bday-month',
+  'bday-year', 'sex', 'tel', 'tel-country-code', 'tel-national', 'tel-area-code', 'tel-local', 'photo',
+])
+
+// Keyword → expected token. Ordered specific-first; the generic "name" rule is last
+// so given/family/user/card names win. \b anchors avoid matching mid-word substrings.
+const PURPOSE_HINTS: Array<{ re: RegExp; token: string }> = [
+  { re: /\be[-\s]?mail\b/i, token: 'email' },
+  { re: /(first|given|fore)[-\s_]?name|\bfname\b|givenname/i, token: 'given-name' },
+  { re: /(last|family|sur)[-\s_]?name|\blname\b|surname/i, token: 'family-name' },
+  { re: /user[-\s_]?name|user[-\s_]?id|\blogin\b/i, token: 'username' },
+  { re: /\bphone\b|\btel\b|mobile|contact[-\s_]?number/i, token: 'tel' },
+  { re: /zip|postal|post[-\s_]?code|pin[-\s_]?code|pincode/i, token: 'postal-code' },
+  { re: /\bcountry\b/i, token: 'country-name' },
+  { re: /company|organi[sz]ation|business[-\s_]?name/i, token: 'organization' },
+  { re: /\bcity\b|\btown\b/i, token: 'address-level2' },
+  { re: /\bstate\b|province|\bregion\b/i, token: 'address-level1' },
+  { re: /street|address[-\s_]?line|\baddress\b|\baddr\b/i, token: 'street-address' },
+  { re: /birth|\bdob\b|\bbday\b/i, token: 'bday' },
+  { re: /card[-\s_]?number|cc[-\s_]?number|credit[-\s_]?card/i, token: 'cc-number' },
+  { re: /\bcvv\b|\bcvc\b|security[-\s_]?code|card[-\s_]?code/i, token: 'cc-csc' },
+  { re: /cardholder|\bcc[-\s_]?name\b/i, token: 'cc-name' },
+  { re: /full[-\s_]?name|your[-\s_]?name|\bname\b/i, token: 'name' },
+]
+
+export function autocompleteHasValidPurpose(autocomplete: string): boolean {
+  return (autocomplete || '').toLowerCase().trim().split(/\s+/).some(t => VALID_AUTOCOMPLETE.has(t))
+}
+
+// Returns the expected autocomplete token when a field appears to collect user info
+// but does not already expose a valid purpose; null otherwise (= no 1.3.5 issue).
+export function inputPurposeIssue(field: { autocomplete: string; hint: string }): string | null {
+  if (autocompleteHasValidPurpose(field.autocomplete)) return null
+  for (const h of PURPOSE_HINTS) if (h.re.test(field.hint || '')) return h.token
+  return null
+}
