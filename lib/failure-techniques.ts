@@ -30,3 +30,26 @@ export function findDuplicateIds(ids: string[]): Array<{ id: string; count: numb
   for (const [id, count] of counts) if (count > 1) dups.push({ id, count })
   return dups
 }
+
+// F96 (SC 2.5.3 Label in Name, Level A / Section 508): when a control's accessible
+// name is OVERRIDDEN (aria-label / aria-labelledby), it must still CONTAIN the
+// visible label text — otherwise speech-input users who say the visible label can't
+// activate it. axe's label-content-name-mismatch is conservative and often reports
+// these only as "needs review" (incomplete), which the audit doesn't surface, so we
+// make the F96 decision here. Returns true when a visible label exists but is NOT
+// contained in the accessible name (the failure condition).
+function normalizeLabel(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N} ]+/gu, ' ') // drop punctuation / symbols / emoji
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export function hasLabelInNameMismatch(visibleText: string, accessibleName: string): boolean {
+  const v = normalizeLabel(visibleText)
+  const a = normalizeLabel(accessibleName)
+  if (!v || !a) return false          // need both a visible label and an accessible name
+  if (!/\p{L}/u.test(v)) return false // visible label must contain letters (skip icon/number-only)
+  return !a.includes(v)               // F96: visible label not contained in the accessible name
+}

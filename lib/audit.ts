@@ -6,7 +6,7 @@ import { validateHtml, type HtmlResult } from '@/lib/html-validate'
 import { validateCss, type CssResult } from '@/lib/css-validate'
 import { checkPageLinks, type LinkCheckResult, type LinkStatus } from '@/lib/linkcheck'
 import { detectForeignLanguage } from '@/lib/langdetect'
-import { hasNewWindowWarning, findDuplicateIds } from '@/lib/failure-techniques'
+import { hasNewWindowWarning, findDuplicateIds, hasLabelInNameMismatch } from '@/lib/failure-techniques'
 import { assertSafeUrl } from '@/lib/ssrf'
 
 // ── Accessibility audit engine ────────────────────────────────
@@ -239,6 +239,7 @@ export async function detectForeignLangParts(page: Page): Promise<Array<{ html: 
 export async function detectFailureTechniques(page: Page): Promise<{
   blankLinks: Array<{ html: string; target: string }>
   dupIds: Array<{ html: string; target: string; id: string; count: number }>
+  labelMismatches: Array<{ html: string; target: string; visibleText: string; accessibleName: string }>
 }> {
   const raw = await page.evaluate(() => {
     // F22 candidates: every link opening a new window, with its accessible text.
@@ -275,7 +276,39 @@ export async function detectFailureTechniques(page: Page): Promise<{
       if (ids.length >= 4000) break
     }
 
-    return { blank, ids }
+    // F96 candidates: interactive controls whose accessible name is OVERRIDDEN by
+    // aria-label / aria-labelledby, captured with their visible text so Node can
+    // check WCAG 2.5.3 (visible label must be contained in the accessible name).
+    const labelCtrls: Array<{ html: string; target: string; visibleText: string; accessibleName: string }> = []
+    const ctrlSel = 'button, a[href], summary, input[type="button"], input[type="submit"], input[type="reset"], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"]'
+    for (const el of Array.from(document.querySelectorAll(ctrlSel))) {
+      if (el.getAttribute('aria-hidden') === 'true') continue
+      const ariaLabel = el.getAttribute('aria-label') || ''
+      const labelledby = el.getAttribute('aria-labelledby') || ''
+      if (!ariaLabel && !labelledby) continue // only when the name is overridden
+      let accessibleName = ariaLabel
+      if (!accessibleName && labelledby) {
+        let t = ''
+        for (const id of labelledby.split(/\s+/)) {
+          if (!id) continue
+          const n = document.getElementById(id)
+          if (n) t += ' ' + (n.textContent || '')
+        }
+        accessibleName = t
+      }
+      const visibleText = el.textContent || ''
+      if (!visibleText.trim()) continue // no visible label → 2.5.3 doesn't apply
+      let target: string
+      if (el.id) target = el.tagName.toLowerCase() + '#' + el.id
+      else {
+        const cls = (el.getAttribute('class') || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).join('.')
+        target = el.tagName.toLowerCase() + (cls ? '.' + cls : '')
+      }
+      labelCtrls.push({ html: (el.outerHTML || '').slice(0, 200), target, visibleText, accessibleName })
+      if (labelCtrls.length >= 150) break
+    }
+
+    return { blank, ids, labelCtrls }
   })
 
   const blankLinks: Array<{ html: string; target: string }> = []
@@ -292,7 +325,19 @@ export async function detectFailureTechniques(page: Page): Promise<{
     if (dupIds.length >= 25) break
   }
 
-  return { blankLinks, dupIds }
+  const labelMismatches: Array<{ html: string; target: string; visibleText: string; accessibleName: string }> = []
+  for (const c of raw.labelCtrls) {
+    if (hasLabelInNameMismatch(c.visibleText, c.accessibleName)) {
+      labelMismatches.push({
+        html: c.html, target: c.target,
+        visibleText: c.visibleText.replace(/\s+/g, ' ').trim().slice(0, 80),
+        accessibleName: c.accessibleName.replace(/\s+/g, ' ').trim().slice(0, 80),
+      })
+    }
+    if (labelMismatches.length >= 25) break
+  }
+
+  return { blankLinks, dupIds, labelMismatches }
 }
 
 async function auditPage(page: Page, url: string, tags: string[] | null, collectSeo: boolean, collectA11y: boolean, collectHtml: boolean, collectCss: boolean, collectLinks: boolean, siteOrigin: string, linkCache: Map<string, LinkStatus>): Promise<PageAuditResult> {
@@ -393,6 +438,21 @@ async function auditPage(page: Page, url: string, tags: string[] | null, collect
               html: d.html,
               target: [d.target],
               failureSummary: `The id "${d.id}" is used ${d.count} times on this page; ids must be unique.`,
+            })),
+          })
+        }
+        if (ft.labelMismatches.length > 0) {
+          violations.push({
+            id: 'label-in-name-mismatch',
+            impact: 'serious',
+            description: 'A control’s accessible name must contain its visible label text, so speech-input users can activate it by the name they see (WCAG 2.5.3 Label in Name, Level A / Section 508, technique F96).',
+            help: 'Accessible name must contain the visible label text',
+            helpUrl: 'https://www.w3.org/WAI/WCAG21/Techniques/failures/F96',
+            tags: ['cat.semantics', 'wcag2a', 'wcag21a', 'wcag253', 'section508', 'EN-301-549'],
+            nodes: ft.labelMismatches.map(m => ({
+              html: m.html,
+              target: [m.target],
+              failureSummary: `Visible label “${m.visibleText}” is not contained in the accessible name “${m.accessibleName}” (WCAG 2.5.3, F96).`,
             })),
           })
         }
