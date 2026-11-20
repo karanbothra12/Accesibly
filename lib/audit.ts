@@ -264,7 +264,6 @@ export async function detectFailureTechniques(page: Page): Promise<{
         target = 'a' + (cls ? '.' + cls : '') + (a.getAttribute('href') ? '[href="' + a.getAttribute('href') + '"]' : '')
       }
       blank.push({ html: (a.outerHTML || '').slice(0, 200), target, accessibleText })
-      if (blank.length >= 60) break
     }
 
     // F77 candidates: every id in the document (grouped/decided in Node).
@@ -274,7 +273,6 @@ export async function detectFailureTechniques(page: Page): Promise<{
       const id = el.id
       if (!id) continue
       ids.push({ id, html: (el.outerHTML || '').slice(0, 160), target: el.tagName.toLowerCase() + '#' + id })
-      if (ids.length >= 4000) break
     }
 
     // F96 candidates: interactive controls whose accessible name is OVERRIDDEN by
@@ -306,7 +304,6 @@ export async function detectFailureTechniques(page: Page): Promise<{
         target = el.tagName.toLowerCase() + (cls ? '.' + cls : '')
       }
       labelCtrls.push({ html: (el.outerHTML || '').slice(0, 200), target, visibleText, accessibleName })
-      if (labelCtrls.length >= 2500) break // high cap: product grids put the real mismatches well past the nav/header controls
     }
 
     // WCAG 1.3.5 candidates: text-entry fields, with the hint text Node uses to infer
@@ -333,7 +330,6 @@ export async function detectFailureTechniques(page: Page): Promise<{
       else if (name) target = tag + '[name="' + name + '"]'
       else { const cls = (el.getAttribute('class') || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).join('.'); target = tag + (cls ? '.' + cls : '') }
       inputs.push({ html: (el.outerHTML || '').slice(0, 200), target, autocomplete: el.getAttribute('autocomplete') || '', hint })
-      if (inputs.length >= 500) break
     }
 
     return { blank, ids, labelCtrls, inputs }
@@ -342,7 +338,6 @@ export async function detectFailureTechniques(page: Page): Promise<{
   const blankLinks: Array<{ html: string; target: string }> = []
   for (const c of raw.blank) {
     if (!hasNewWindowWarning(c.accessibleText)) blankLinks.push({ html: c.html, target: c.target })
-    if (blankLinks.length >= 25) break
   }
 
   const dupInfo = findDuplicateIds(raw.ids.map(i => i.id))
@@ -350,7 +345,6 @@ export async function detectFailureTechniques(page: Page): Promise<{
   for (const d of dupInfo) {
     const first = raw.ids.find(i => i.id === d.id)
     dupIds.push({ id: d.id, count: d.count, html: first ? first.html : '', target: first ? first.target : '#' + d.id })
-    if (dupIds.length >= 25) break
   }
 
   const labelMismatches: Array<{ html: string; target: string; visibleText: string; accessibleName: string }> = []
@@ -362,14 +356,12 @@ export async function detectFailureTechniques(page: Page): Promise<{
         accessibleName: c.accessibleName.replace(/\s+/g, ' ').trim().slice(0, 80),
       })
     }
-    if (labelMismatches.length >= 25) break
   }
 
   const inputPurpose: Array<{ html: string; target: string; expected: string }> = []
   for (const f of raw.inputs) {
     const expected = inputPurposeIssue({ autocomplete: f.autocomplete, hint: f.hint })
     if (expected) inputPurpose.push({ html: f.html, target: f.target, expected })
-    if (inputPurpose.length >= 25) break
   }
 
   return { blankLinks, dupIds, labelMismatches, inputPurpose }
