@@ -306,7 +306,7 @@ export async function detectFailureTechniques(page: Page): Promise<{
         target = el.tagName.toLowerCase() + (cls ? '.' + cls : '')
       }
       labelCtrls.push({ html: (el.outerHTML || '').slice(0, 200), target, visibleText, accessibleName })
-      if (labelCtrls.length >= 150) break
+      if (labelCtrls.length >= 2500) break // high cap: product grids put the real mismatches well past the nav/header controls
     }
 
     // WCAG 1.3.5 candidates: text-entry fields, with the hint text Node uses to infer
@@ -333,7 +333,7 @@ export async function detectFailureTechniques(page: Page): Promise<{
       else if (name) target = tag + '[name="' + name + '"]'
       else { const cls = (el.getAttribute('class') || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).join('.'); target = tag + (cls ? '.' + cls : '') }
       inputs.push({ html: (el.outerHTML || '').slice(0, 200), target, autocomplete: el.getAttribute('autocomplete') || '', hint })
-      if (inputs.length >= 150) break
+      if (inputs.length >= 500) break
     }
 
     return { blank, ids, labelCtrls, inputs }
